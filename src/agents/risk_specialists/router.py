@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from src.graph.state import AgentState
 from src.utils.llm import call_llm
@@ -17,12 +17,34 @@ from src.utils.risk_pipeline import (
 
 
 class SpecialistReport(BaseModel):
-    probability_pct: float = Field(ge=0, le=100)
+    model_config = ConfigDict(extra="ignore")
+
+    probability_pct: float = Field(
+        ge=0,
+        le=100,
+        validation_alias=AliasChoices("probability_pct", "probability"),
+    )
     severity: str = Field(description="low, medium, or high")
     severity_score: float = Field(ge=0, le=10)
     early_warnings: list[str] = Field(default_factory=list)
     historical_examples: list[str] = Field(default_factory=list)
     summary: str = Field(description="2-4 sentence research memo")
+
+    @field_validator("severity", mode="before")
+    @classmethod
+    def _normalize_severity(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    @field_validator("early_warnings", "historical_examples", mode="before")
+    @classmethod
+    def _coerce_string_list(cls, value: object) -> object:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return value
 
 
 def route_specialists(category: str) -> list[str]:
