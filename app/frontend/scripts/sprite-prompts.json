@@ -1,0 +1,30 @@
+{
+  "reference": "fundamentals_analyst.png",
+  "layout": "IMPORTANT: output a PNG image. Match the attached reference sprite sheet EXACTLY in grid layout: 1024×1024 pixel art, 5 rows × 8 columns. Row 0: walk SOUTH 4 frames then walk SOUTHWEST 4 frames. Row 1: walk WEST 4 frames then walk NORTHWEST 4 frames. Row 2: walk NORTH 4 frames then walk NORTHEAST 4 frames. Row 3: walk EAST 4 frames then walk SOUTHEAST 4 frames. Row 4: IDLE 4 frames centered (cols 3–6). Each character faces the correct direction per row label. Plain white background only. Chibi pixel art, same scale and frame spacing as reference.",
+  "agents": [
+    { "key": "aswath_damodaran", "character": "Indian valuation professor, glasses, academic blazer, holding DCF spreadsheet and calculator", "palette": "indigo and cream" },
+    { "key": "ben_graham", "character": "1940s value investor, tweed suit, cigar, Intelligent Investor book under arm", "palette": "sepia brown" },
+    { "key": "bill_ackman", "character": "activist investor, sharp modern suit, bold presentation folder labeled ACTIVIST", "palette": "red and charcoal" },
+    { "key": "cathie_wood", "character": "disruption investor, futuristic jacket, ARK logo pin, holding innovation tablet", "palette": "hot pink and purple neon" },
+    { "key": "charlie_munger", "character": "elderly wise investor, reading glasses, mental models notebook, simple cardigan", "palette": "sky blue and gray" },
+    { "key": "michael_burry", "character": "contrarian investor, hoodie, messy hair, credit default swap printouts", "palette": "dark gray and muted green" },
+    { "key": "mohnish_pabrai", "character": "frugal value investor, simple shirt, Dhando Investor book, humble posture", "palette": "mustard yellow" },
+    { "key": "nassim_taleb", "character": "philosopher trader, black turtleneck, antifragility book, stoic stance", "palette": "black and slate" },
+    { "key": "peter_lynch", "character": "retail investor, casual blazer, mall research notes, ten-bagger folder", "palette": "emerald green" },
+    { "key": "phil_fisher", "character": "growth researcher, field notes clipboard, scuttlebutt interview pad", "palette": "teal" },
+    { "key": "rakesh_jhunjhunwala", "character": "emerging markets bull, confident posture, small bull figurine, trading terminal tablet", "palette": "orange and gold" },
+    { "key": "stanley_druckenmiller", "character": "macro trader, rolled sleeves, world macro map printout", "palette": "blue" },
+    { "key": "george_soros", "character": "reflexivity macro trader, European suit, philosophy book, thoughtful pose", "palette": "purple" },
+    { "key": "jim_simons", "character": "quant legend, neat shirt, chalkboard formula tablet, calm analytical look", "palette": "cyan" },
+    { "key": "howard_marks", "character": "credit cycle investor, memo stack, cautious expression, Oaktree-style folder", "palette": "brown" },
+    { "key": "seth_klarman", "character": "deep value investor, conservative suit, Margin of Safety book, patient stance", "palette": "slate gray" },
+    { "key": "john_templeton", "character": "global contrarian, vintage suit, world map scroll, optimistic posture", "palette": "teal green" },
+    { "key": "joel_greenblatt", "character": "magic formula investor, simple tie, earnings yield worksheet", "palette": "lime green" },
+    { "key": "ray_dalio", "character": "macro allocator, Bridgewater-style minimalist outfit, principles notebook", "palette": "royal blue" },
+    { "key": "paul_tudor_jones", "character": "trend trader, polo shirt, macro trend chart roll", "palette": "crimson red" },
+    { "key": "carl_icahn", "character": "activist raider, power suit, proxy fight dossier", "palette": "dark red" },
+    { "key": "li_lu", "character": "China value investor, understated blazer, compounder research notes", "palette": "forest green" },
+    { "key": "masayoshi_son", "character": "visionary investor, bold jacket, SoftBank-style vision deck tablet", "palette": "violet" },
+    { "key": "warren_buffett", "character": "elder value investor Omaha style, gray hair, glasses, Berkshire annual report and Coke can", "palette": "warm brown and burgundy" }
+  ]
+}

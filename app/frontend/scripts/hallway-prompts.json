@@ -1,0 +1,10 @@
+{
+  "reference": "hallway_horizontal.png",
+  "referenceDir": "hallways",
+  "segments": [
+    {
+      "key": "hallway_vertical",
+      "prompt": "Generate an image. You must output a PNG image. Use the attached horizontal hallway as the EXACT style match — same pixel art, same red carpet texture, same dark wood wall panels, same golden strip lighting along wall tops. Rotate the hallway 90 degrees: it runs TOP to BOTTOM (vertical connector between stacked cubicles). Same top-down isometric hex floor perspective as the reference, open walkable red carpet floor in the center, wood walls on left and right sides. NO people, NO furniture. Transparent or white background outside the hallway shape."
+    }
+  ]
+}

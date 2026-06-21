@@ -1,0 +1,234 @@
+{
+  "referenceNamed": "warren_buffett.png",
+  "referenceData": "fundamentals_analyst.png",
+  "agents": [
+    {
+      "key": "technical_analyst",
+      "tier": "data",
+      "accent": "#22d3ee",
+      "prompt": "Generate a new image. Use the attached reference hex isometric pixel art office as the EXACT style template (same hex shape, isometric camera angle, pixel density, wall/floor proportions). Redesign the interior as a TECHNICAL ANALYST tape reader desk: multiple CRT monitors showing candlestick charts and moving averages, ticker tape printer, dark trading pit carpet, keyboard and mouse, sticky notes with support/resistance levels. NO characters or people. NO sprites. Room furniture only. Plain white background outside the hex boundary."
+    },
+    {
+      "key": "valuation_analyst",
+      "tier": "data",
+      "accent": "#a78bfa",
+      "prompt": "Generate a new image. Match the attached reference hex isometric pixel art office exactly (hex frame, isometric angle, pixel art style). Interior is a VALUATION ANALYST model bench: whiteboard covered in DCF formulas, stacked Excel printouts, calculator, WACC and terminal value notes, discounted cash flow waterfall chart on screen. NO characters. Plain white outside hex."
+    },
+    {
+      "key": "sentiment_analyst",
+      "tier": "data",
+      "accent": "#f472b6",
+      "prompt": "Generate a new image. Same hex isometric pixel art format as reference. Interior is SENTIMENT ANALYST crowd mood desk: gauges and dials for fear/greed, social feed monitors, emoji sentiment heatmap, behavioral finance posters, mood ring style indicators. NO characters. White background outside hex."
+    },
+    {
+      "key": "news_sentiment_analyst",
+      "tier": "data",
+      "accent": "#94a3b8",
+      "prompt": "Generate a new image. Match reference hex pixel art office layout. Interior is NEWS WIRE desk: scrolling headline ticker, stacked newspapers, press release binders labeled WIRE, AP/Reuters style monitors, teletype machine aesthetic. NO characters. White outside hex."
+    },
+    {
+      "key": "growth_analyst",
+      "tier": "data",
+      "accent": "#4ade80",
+      "prompt": "Generate a new image. Same hex isometric pixel art as reference. Interior is GROWTH ANALYST pit: hockey-stick revenue charts, TAM/SAM slides on wall, neon green growth metrics, seed-stage pitch decks piled on desk. NO characters. White outside hex."
+    },
+    {
+      "key": "aswath_damodaran",
+      "tier": "named",
+      "accent": "#6366f1",
+      "prompt": "Generate a new image. Use attached Warren Buffett-style hex isometric pixel art office as style reference (same hex shape and camera). Redesign as Aswath Damodaran valuation professor office: NYU academic desk, books titled VALUATION and DAMODARAN, whiteboard with cost of capital formulas, spreadsheet printouts, crystal-clear DCF model on monitor. NO Warren Buffett, NO characters. White outside hex."
+    },
+    {
+      "key": "ben_graham",
+      "tier": "named",
+      "accent": "#78716c",
+      "prompt": "Generate a new image. Match reference hex isometric pixel art office. Ben Graham 1940s value investing study: leather chair, Security Analysis and Intelligent Investor books, cigar ash tray, margin of safety chalkboard, old ledger books, conservative wood paneling. NO characters. White outside hex."
+    },
+    {
+      "key": "bill_ackman",
+      "tier": "named",
+      "accent": "#ef4444",
+      "prompt": "Generate a new image. Same hex pixel art office as reference. Bill Ackman activist investor office: bold presentation board, activist memo stack, Pershing-style clean modern desk, target company dossiers, contrarian thesis notes. NO characters. White outside hex."
+    },
+    {
+      "key": "cathie_wood",
+      "tier": "named",
+      "accent": "#ec4899",
+      "prompt": "Generate a new image. Match hex isometric pixel art reference. Cathie Wood disruption desk: futuristic neon accents, ARK innovation posters, DNA helix model, rocket and EV sketches, exponential adoption curve charts, bold pink/purple lighting. NO characters. White outside hex."
+    },
+    {
+      "key": "charlie_munger",
+      "tier": "named",
+      "accent": "#0ea5e9",
+      "prompt": "Generate a new image. Same hex pixel art office as reference. Charlie Munger mental models room: latticework chalkboard, psychology of human misjudgment notes, reading chair with stacked books, worldly wisdom quotes, simpler than Buffett but scholarly. NO characters. White outside hex."
+    },
+    {
+      "key": "michael_burry",
+      "tier": "named",
+      "accent": "#64748b",
+      "prompt": "Generate a new image. Match hex isometric pixel art reference. Michael Burry Big Short basement office: dim lighting, credit default swap printouts, housing bubble charts pinned to wall, empty coffee cups, lonely desk with triple monitors, rain on window feel. NO characters. White outside hex."
+    },
+    {
+      "key": "mohnish_pabrai",
+      "tier": "named",
+      "accent": "#eab308",
+      "prompt": "Generate a new image. Same hex pixel art office as reference. Mohnish Pabrai doubles desk: frugal simple office, Dhando Investor book, cloning great investors checklist, minimal furniture, yellow notepad, humble carpet. NO characters. White outside hex."
+    },
+    {
+      "key": "nassim_taleb",
+      "tier": "named",
+      "accent": "#1e293b",
+      "prompt": "Generate a new image. Match hex isometric pixel art reference. Nassim Taleb antifragility study: black swan artwork, barbell strategy diagram, stoic philosophy books, thick skin / fragile labels on whiteboard, Mediterranean aesthetic touches. NO characters. White outside hex."
+    },
+    {
+      "key": "peter_lynch",
+      "tier": "named",
+      "accent": "#10b981",
+      "prompt": "Generate a new image. Same hex pixel art office as reference. Peter Lynch ten-bagger hunt office: corkboard with mall research photos, local company products on shelf, One Up On Wall Street book, simple approachable desk, consumer brand samples. NO characters. White outside hex."
+    },
+    {
+      "key": "phil_fisher",
+      "tier": "named",
+      "accent": "#14b8a6",
+      "prompt": "Generate a new image. Match hex isometric pixel art reference. Phil Fisher scuttlebutt desk: interview notes, Common Stocks and Uncommon Profits book, field research maps, management quality checklist, long-term growth charts. NO characters. White outside hex."
+    },
+    {
+      "key": "rakesh_jhunjhunwala",
+      "tier": "named",
+      "accent": "#f97316",
+      "prompt": "Generate a new image. Same hex pixel art office as reference. Rakesh Jhunjhunwala emerging markets bull desk: small bull statue, India market ticker, vibrant colors, optimistic macro notes, trading terminal with NSE/BSE feel. NO characters. White outside hex."
+    },
+    {
+      "key": "stanley_druckenmiller",
+      "tier": "named",
+      "accent": "#3b82f6",
+      "prompt": "Generate a new image. Match hex isometric pixel art reference. Stanley Druckenmiller macro trading office: world map with currency pins, Fed rate chart wall, large multi-screen macro dashboard, global bond and FX monitors, top-down thesis board. NO characters. White outside hex."
+    },
+    {
+      "key": "george_soros",
+      "tier": "named",
+      "accent": "#8b5cf6",
+      "prompt": "Generate a new image. Match hex isometric pixel art reference. George Soros reflexivity macro desk: open society philosophy books, feedback loop diagram on whiteboard (price ↔ narrative), currency crisis newspaper clippings, global macro flow chart, asymmetric bet payoff sketch, purple accent lighting. NO characters. White outside hex."
+    },
+    {
+      "key": "jim_simons",
+      "tier": "named",
+      "accent": "#06b6d4",
+      "prompt": "Generate a new image. Match the attached hex isometric pixel art office exactly: same hex boundary, isometric angle, pixel density, and white outside background. Interior is Jim Simons quantitative research lab: chalkboards filled with stochastic equations, signal heatmaps, servers with blinking cyan lights, statistical arbitrage dashboards, clean mathematical desk. NO characters or people."
+    },
+    {
+      "key": "howard_marks",
+      "tier": "named",
+      "accent": "#92400e",
+      "prompt": "Generate a new image. Match the reference hex isometric pixel art office style. Interior is Howard Marks risk memo room: distressed debt binders, credit cycle wall clock, downside-risk traffic lights, handwritten memo pages, cautious amber lighting, bond certificates and leverage charts. NO characters. White outside hex."
+    },
+    {
+      "key": "seth_klarman",
+      "tier": "named",
+      "accent": "#475569",
+      "prompt": "Generate a new image. Same hex isometric pixel art as reference. Seth Klarman deep value vault: safe door motif, margin-of-safety ledger, discounted asset appraisals, cash box, conservative gray-blue palette, thick risk checklist on desk. NO characters. Plain white outside hex."
+    },
+    {
+      "key": "john_templeton",
+      "tier": "named",
+      "accent": "#0f766e",
+      "prompt": "Generate a new image. Match reference hex pixel art office. John Templeton global contrarian office: vintage globe, world market newspapers, maximum pessimism quote board, bargain maps with pins, long-term recovery charts, calm teal accents. NO characters. White outside hex."
+    },
+    {
+      "key": "joel_greenblatt",
+      "tier": "named",
+      "accent": "#65a30d",
+      "prompt": "Generate a new image. Same hex isometric pixel art format as reference. Joel Greenblatt magic formula desk: two large scoreboards labeled EARNINGS YIELD and RETURN ON CAPITAL, ranked stock cards, green chalkboard formula, simple professor-office furniture. NO characters. White outside hex."
+    },
+    {
+      "key": "ray_dalio",
+      "tier": "named",
+      "accent": "#2563eb",
+      "prompt": "Generate a new image. Match hex isometric pixel art reference. Ray Dalio all-weather macro machine room: economic cycle machine diagram, four-quadrant growth/inflation map, bridgewater-style research pods, balanced portfolio weather gauges, blue institutional lighting. NO characters. White outside hex."
+    },
+    {
+      "key": "paul_tudor_jones",
+      "tier": "named",
+      "accent": "#dc2626",
+      "prompt": "Generate a new image. Match reference hex pixel art office. Paul Tudor Jones macro trader room: wall of trend charts, risk stop-loss board, red phone, futures tape, volatility regime monitor, disciplined trading cockpit energy. NO characters. White outside hex."
+    },
+    {
+      "key": "carl_icahn",
+      "tier": "named",
+      "accent": "#b91c1c",
+      "prompt": "Generate a new image. Same hex isometric pixel art style as reference. Carl Icahn activist war room: proxy battle documents, boardroom table, target company dossier wall, red pressure campaign pins, capital structure whiteboard, bold corporate-raider atmosphere. NO characters. White outside hex."
+    },
+    {
+      "key": "li_lu",
+      "tier": "named",
+      "accent": "#15803d",
+      "prompt": "Generate a new image. Match attached hex pixel art office. Li Lu quality compounder desk: Munger-inspired reading chair, long-term compounding curve, conservative balance sheet checklist, Asia value investing maps, calm green wood-and-brass study. NO characters. White outside hex."
+    },
+    {
+      "key": "masayoshi_son",
+      "tier": "named",
+      "accent": "#7c3aed",
+      "prompt": "Generate a new image. Match reference hex isometric pixel art office. Masayoshi Son visionary convexity lab: future-tech storyboard wall, AI chips, robotics sketches, SoftBank-style portfolio constellation, purple neon TAM curve, high-upside moonshot dashboard. NO characters. White outside hex."
+    },
+    {
+      "key": "unknown_unknowns",
+      "tier": "named",
+      "accent": "#991b1b",
+      "prompt": "Generate a new image. Match attached Warren Buffett-style hex isometric pixel art office (same hex frame, isometric angle, pixel density). Interior is UNKNOWN UNKNOWNS red-team thesis attack desk: crimson warning lights, chalkboard with question marks and crossed-out bull theses, risk binders labeled RED TEAM and FAIL MODES, magnifying glass over financial statements with red circles, broken consensus chart, hazard stripe tape, ominous desk lamp glow. NO characters. Plain white outside hex."
+    },
+    {
+      "key": "argument_room",
+      "tier": "named",
+      "accent": "#ef4444",
+      "prompt": "Generate a new image. Match attached Warren Buffett-style hex isometric pixel art office as style reference (same hex shape, isometric camera, pixel density). Redesign as a heated INVESTMENT COMMITTEE ARGUMENT ROOM: circular debate table in center, two opposing podiums facing each other, red accent lighting, ticker boards showing BULL vs BEAR, scattered analyst printouts, coffee cups, crumpled notes, dramatic confrontation energy — but NO characters or people. Wider feeling chamber, boardroom-meets-trading-pit. Plain white background outside hex."
+    },
+    {
+      "key": "risk_forge",
+      "tier": "named",
+      "accent": "#dc2626",
+      "prompt": "Generate a new image. Match attached hex isometric pixel art office (same hex frame, isometric angle, pixel density). Interior is RISK FORGE — stage-one risk brainstorming foundry: glowing crimson forge anvil with molten risk ingots, wall of blank risk cards being stamped, heat-map sketch wall, hazard diamond icons, industrial risk inventory conveyor belt, red-orange furnace glow, labeled bins UNKNOWNS and TAIL RISKS. NO characters. Plain white outside hex."
+    },
+    {
+      "key": "risk_research_hub",
+      "tier": "named",
+      "accent": "#b45309",
+      "prompt": "Generate a new image. Match attached hex isometric pixel art office. Interior is RISK RESEARCH HUB — wide specialist operations floor: six labeled analyst bays (CHINA, MACRO, SUPPLY CHAIN, COMPETITION, TECH, REGULATORY), central routing console with risk tickets, probability and severity gauges, amber task lights, shared research library, interconnected desks with yarn-and-pin evidence boards. Feels like a war room with sub-desks. NO characters. Plain white outside hex."
+    },
+    {
+      "key": "scenario_lab",
+      "tier": "named",
+      "accent": "#7c3aed",
+      "prompt": "Generate a new image. Match attached hex isometric pixel art office. Interior is SCENARIO LAB — financial stress-test laboratory: purple-lit simulation chamber, tornado chart on main screen, revenue/EPS/DCF impact sliders, scenario levers labeled BULL BASE BEAR, Monte Carlo printouts, exposed-segment pie charts, scientific flask metaphor with chart smoke. NO characters. Plain white outside hex."
+    },
+    {
+      "key": "risk_watchtower",
+      "tier": "named",
+      "accent": "#0d9488",
+      "prompt": "Generate a new image. Match attached hex isometric pixel art office. Interior is RISK WATCHTOWER — live monitoring tower desk: teal radar sweep display, traffic-light status panel (green yellow red), periscope-style viewport, monthly delta ticker tape, indicator gauges for geopolitical and supply-chain alerts, calm watch officer console with alarm silencer. NO characters. Plain white outside hex."
+    },
+    {
+      "key": "supply_chain_cartographer",
+      "tier": "named",
+      "accent": "#0891b2",
+      "prompt": "Generate a new image. Match attached hex isometric pixel art office (same hex frame, isometric angle, pixel density). Interior is SUPPLY CHAIN CARTOGRAPHER — logistics mapping war room: large wall network graph with supplier and customer nodes connected by glowing cyan links, tiered shelves of shipping manifests, globe with trade lanes, TSMC-style fab icons, bottleneck warning pins, yarn map on corkboard, magnifying glass over bill of materials. NO characters. Plain white outside hex."
+    },
+    {
+      "key": "opportunity_cost",
+      "tier": "named",
+      "accent": "#ca8a04",
+      "prompt": "Generate a new image. Match attached hex isometric pixel art office. Interior is OPPORTUNITY COST desk — capital tradeoff chamber: golden balance scale weighing this stock vs cash vs index, comparison matrix on monitor (FORGONE YIELD / PEER SPREAD / ALT IDEAS), ticker tabs for alternatives, hourglass and compound-interest curve poster, sparse disciplined furniture, amber accent lamps. NO characters. Plain white outside hex."
+    },
+    {
+      "key": "ripple_desk",
+      "tier": "named",
+      "accent": "#8b5cf6",
+      "prompt": "Generate a new image. Match attached hex isometric pixel art office. Interior is RIPPLE DESK — second-order effects cascade room: purple-lit waterfall diagram on wall showing THEN WHAT arrows (demand → power → utilities → transformers), domino chain on desk, hidden beneficiary sticky notes three hops away, consensus bull thesis crossed out with ripple paths branching, echo wave motif. NO characters. Plain white outside hex."
+    },
+    {
+      "key": "bastion_moat",
+      "tier": "named",
+      "accent": "#059669",
+      "prompt": "Generate a new image. Match attached hex isometric pixel art office. Interior is BASTION moat fortress index: emerald castle rampart model on desk, switching-cost padlock icons, network-effect node cluster sculpture, wide-moat diagram poster (CUSTOMERS / PRICING POWER / DURABILITY), stone-and-glass aesthetic, competitive fortress walls around a platform logo silhouette. NO characters. Plain white outside hex."
+    }
+  ]
+}
