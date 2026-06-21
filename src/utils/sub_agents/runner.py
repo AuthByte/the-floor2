@@ -67,7 +67,6 @@ def plan_sub_agents(
         return []
 
     from src.llm.models import ModelProvider, get_model
-    from src.utils.aux_model import resolve_aux_model
 
     options = "\n".join(f"- {s.id}: {s.label} — {s.description}" for s in catalog)
     template = ChatPromptTemplate.from_messages(
@@ -116,8 +115,7 @@ def plan_sub_agents(
     try:
         request = state.get("metadata", {}).get("request")
         api_keys = request.api_keys if request and hasattr(request, "api_keys") else None
-        aux_model, aux_provider = resolve_aux_model(state, PLANNER_MODEL)
-        llm = get_model(aux_model, aux_provider, api_keys)
+        llm = get_model(PLANNER_MODEL, ModelProvider.OPENROUTER.value, api_keys)
         structured = llm.with_structured_output(SubAgentPlan, method="json_mode")
         plan: SubAgentPlan = structured.invoke(prompt)
     except Exception:

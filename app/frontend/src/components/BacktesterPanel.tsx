@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { runBacktest } from "../lib/api";
 import { buildAgentGraph } from "../lib/buildGraph";
-import { OLLAMA_PROVIDER } from "../lib/models";
+import { PROVIDER } from "../lib/models";
 import { parseWatchlistInput } from "../lib/tickerInput";
 import type {
   BacktestDayResult,
@@ -15,7 +15,6 @@ interface Props {
   onClose: () => void;
   tickers: string;
   model: string;
-  provider: string;
   openrouterKey: string;
   enabledAgentKeys: string[];
   initialCapital: number;
@@ -80,7 +79,6 @@ export function BacktesterPanel(p: Props) {
 
   const parsed = useMemo(() => parseWatchlistInput(p.tickers), [p.tickers]);
   const directTickers = parsed.kind === "direct" ? parsed.tickers : [];
-  const isLocal = p.provider === OLLAMA_PROVIDER;
   const isRunning = runState === "running";
 
   const blockers = useMemo(() => {
@@ -88,12 +86,12 @@ export function BacktesterPanel(p: Props) {
     if (directTickers.length === 0)
       out.push("Enter ticker symbols (e.g. AAPL, MSFT) in the console watchlist");
     if (p.enabledAgentKeys.length === 0) out.push("Enable at least one analyst in Manage Roster");
-    if (!isLocal && !p.openrouterKey.trim()) out.push("Add an OpenRouter key (or pick a local model)");
+    if (!p.openrouterKey.trim()) out.push("Add an OpenRouter key (unshelve keys in the console)");
     if (!startDate || !endDate) out.push("Pick a start and end date");
     else if (startDate >= endDate) out.push("Start date must be before end date");
     if (!(capital > 0)) out.push("Initial capital must be positive");
     return out;
-  }, [directTickers.length, p.enabledAgentKeys.length, isLocal, p.openrouterKey, startDate, endDate, capital]);
+  }, [directTickers.length, p.enabledAgentKeys.length, p.openrouterKey, startDate, endDate, capital]);
 
   const canRun = blockers.length === 0 && !isRunning;
 
@@ -119,7 +117,7 @@ export function BacktesterPanel(p: Props) {
         graph_nodes: graphNodes,
         graph_edges: graphEdges,
         model_name: p.model,
-        model_provider: p.provider,
+        model_provider: PROVIDER,
         start_date: startDate,
         end_date: endDate,
         initial_capital: capital,

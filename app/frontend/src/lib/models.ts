@@ -21,20 +21,3 @@ export const OPENROUTER_MODELS: ModelPreset[] = [
 
 export const DEFAULT_MODEL = "openrouter/owl-alpha";
 export const PROVIDER = "OpenRouter";
-
-/** Provider string the backend expects for local Ollama models. */
-export const OLLAMA_PROVIDER = "Ollama";
-
-/** Build a model preset for a locally-installed Ollama model. */
-export function ollamaPreset(modelName: string): ModelPreset {
-  return { id: modelName, label: modelName, hint: "local" };
-}
-
-/**
- * Resolve the backend provider for a selected model id. Ollama model names are
- * passed straight through (they are never part of the OpenRouter preset list),
- * everything else is routed via OpenRouter.
- */
-export function providerForModel(modelId: string, ollamaModels: string[]): string {
-  return ollamaModels.includes(modelId) ? OLLAMA_PROVIDER : PROVIDER;
-}

@@ -51,7 +51,6 @@ def plan_custom_chart(
     from langchain_core.prompts import ChatPromptTemplate
 
     from src.llm.models import ModelProvider, get_model
-    from src.utils.aux_model import resolve_aux_model
 
     data_preview = json.dumps(serialize_metrics_ctx(metrics_ctx), default=str)[:3500]
     template = ChatPromptTemplate.from_messages(
@@ -92,8 +91,7 @@ def plan_custom_chart(
     )
 
     try:
-        aux_model, aux_provider = resolve_aux_model(state, PLANNER_MODEL)
-        llm = get_model(aux_model, aux_provider, _api_keys(state))
+        llm = get_model(PLANNER_MODEL, ModelProvider.OPENROUTER.value, _api_keys(state))
         structured = llm.with_structured_output(CustomChartDraft, method="json_mode")
         draft: CustomChartDraft = structured.invoke(prompt)
         if draft.title and draft.code and draft.code.strip():
