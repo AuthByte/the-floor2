@@ -8,6 +8,7 @@ from typing import Any
 from langchain_core.prompts import ChatPromptTemplate
 
 from src.llm.models import ModelProvider, get_model
+from src.utils.aux_model import resolve_aux_model
 from src.utils.agent_artifacts.plan import PLANNER_MODEL, _api_keys
 from src.utils.supply_chain.models import SupplyChainGraphModel
 from src.utils.supply_chain.seeds import seed_graph_for_ticker
@@ -128,7 +129,8 @@ def _invoke_planner(
     )
     prompt = template.invoke({"ticker": ticker, "context": context, "min_nodes": min_nodes})
     try:
-        llm = get_model(PLANNER_MODEL, ModelProvider.OPENROUTER.value, _api_keys(state))
+        aux_model, aux_provider = resolve_aux_model(state, PLANNER_MODEL)
+        llm = get_model(aux_model, aux_provider, _api_keys(state))
         structured = llm.with_structured_output(SupplyChainGraphModel, method="json_mode")
         out: SupplyChainGraphModel = structured.invoke(prompt)
         if out.nodes and out.edges:

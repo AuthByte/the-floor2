@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from src.graph.state import AgentState
 from src.llm.models import ModelProvider, get_model
+from src.utils.aux_model import resolve_aux_model
 from src.utils.progress import progress
 from src.utils.ticker_dossier import record_ticker_claim
 from src.utils.thesis_outlook import enrich_outlook, extract_outlook
@@ -74,7 +75,8 @@ def summarize_investor_thesis(
     )
 
     try:
-        llm = get_model(SUMMARIZER_MODEL, SUMMARIZER_PROVIDER, _api_keys_from_state(state))
+        aux_model, aux_provider = resolve_aux_model(state, SUMMARIZER_MODEL, SUMMARIZER_PROVIDER)
+        llm = get_model(aux_model, aux_provider, _api_keys_from_state(state))
         structured = llm.with_structured_output(ThesisSummaryLine, method="json_mode")
         out: ThesisSummaryLine = structured.invoke(prompt)
         text = (out.summary or "").strip()

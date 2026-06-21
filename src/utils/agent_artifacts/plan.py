@@ -68,6 +68,7 @@ def plan_charts(
     from langchain_core.prompts import ChatPromptTemplate
 
     from src.llm.models import ModelProvider, get_model
+    from src.utils.aux_model import resolve_aux_model
 
     template = ChatPromptTemplate.from_messages(
         [
@@ -101,7 +102,8 @@ def plan_charts(
     )
 
     try:
-        llm = get_model(PLANNER_MODEL, ModelProvider.OPENROUTER.value, _api_keys(state))
+        aux_model, aux_provider = resolve_aux_model(state, PLANNER_MODEL)
+        llm = get_model(aux_model, aux_provider, _api_keys(state))
         structured = llm.with_structured_output(ChartPlan, method="json_mode")
         plan: ChartPlan = structured.invoke(prompt)
         cleaned: list[ChartPick] = []
