@@ -8,6 +8,7 @@ process-local default under `app/backend/static/artifacts/_unscoped`.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import shutil
 import time
@@ -24,7 +25,10 @@ from src.utils.agent_artifacts.types import ArtifactMeta
 
 logger = logging.getLogger(__name__)
 
-ARTIFACT_ROOT = Path(__file__).resolve().parents[3] / "app" / "backend" / "static" / "artifacts"
+_DEFAULT_ARTIFACT_ROOT = (
+    Path(__file__).resolve().parents[3] / "app" / "backend" / "static" / "artifacts"
+)
+ARTIFACT_ROOT = Path(os.getenv("ARTIFACT_DIR", str(_DEFAULT_ARTIFACT_ROOT)))
 URL_PREFIX = "/artifacts"
 TTL_SECONDS = 24 * 60 * 60
 
