@@ -7,6 +7,13 @@ import logging
 from app.backend.database import get_db
 
 logger = logging.getLogger(__name__)
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+    "Content-Encoding": "none",
+}
 from app.backend.models.schemas import (
     ErrorResponse,
     HedgeFundRequest,
@@ -431,7 +438,9 @@ async def run(request_data: HedgeFundRequest, request: Request, db: Session = De
                     disconnect_task.cancel()
 
         # Return a streaming response
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
+        return StreamingResponse(
+            event_generator(), media_type="text/event-stream", headers=_SSE_HEADERS
+        )
 
     except HTTPException as e:
         raise e
@@ -625,7 +634,9 @@ async def backtest(request_data: BacktestRequest, request: Request, db: Session 
                     disconnect_task.cancel()
 
         # Return a streaming response
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
+        return StreamingResponse(
+            event_generator(), media_type="text/event-stream", headers=_SSE_HEADERS
+        )
 
     except HTTPException as e:
         raise e

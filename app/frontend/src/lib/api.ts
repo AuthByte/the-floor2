@@ -2,8 +2,15 @@ import type { CompletePayload, HedgeFundRequest, ResolveTickersRequest, ResolveT
 
 import type { PaperAccountSnapshot, PaperPosition } from "./types";
 
+const configuredApiUrl = import.meta.env.VITE_API_URL as string | undefined;
+
+/** Production on Vercel uses same-origin rewrites (see vercel.json); dev hits local FastAPI. */
 export const API_BASE_URL =
-  (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8000";
+  configuredApiUrl !== undefined
+    ? configuredApiUrl
+    : import.meta.env.PROD
+      ? ""
+      : "http://localhost:8000";
 
 /** Prefix relative backend URLs (e.g. /artifacts/...) with the API base. */
 export function resolveBackendUrl(path: string): string {
