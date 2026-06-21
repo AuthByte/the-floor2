@@ -88,10 +88,14 @@ export function runHedgeFund(req: HedgeFundRequest, handlers: StreamHandlers) {
       const decoder = new TextDecoder();
       let buf = "";
       let completed = false;
+      let reading = true;
 
-      while (true) {
+      while (reading) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          reading = false;
+          break;
+        }
         buf += decoder.decode(value, { stream: true });
 
         let sep: number;
@@ -174,7 +178,9 @@ export async function postDebateInterjection(body: {
   }
 }
 
-function parseSse(chunk: string): { event: string; data: any } | null {
+function parseSse(
+  chunk: string,
+): { event: string; data: Record<string, unknown> } | null {
   const lines = chunk.split("\n");
   let event = "message";
   let data = "";
@@ -184,7 +190,7 @@ function parseSse(chunk: string): { event: string; data: any } | null {
   }
   if (!data) return null;
   try {
-    return { event, data: JSON.parse(data) };
+    return { event, data: JSON.parse(data) as Record<string, unknown> };
   } catch {
     return null;
   }

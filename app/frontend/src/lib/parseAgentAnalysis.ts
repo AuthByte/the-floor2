@@ -237,8 +237,8 @@ function isFundamentalsReasoning(obj: Record<string, unknown>): boolean {
 
 function parseFundamentals(obj: Record<string, unknown>): FundamentalsPayload {
   const inner = unwrapTickerPayload(obj);
-  let signal = typeof inner.signal === "string" ? inner.signal : undefined;
-  let confidence =
+  const signal = typeof inner.signal === "string" ? inner.signal : undefined;
+  const confidence =
     typeof inner.confidence === "number" ? inner.confidence : undefined;
   let reasoning: Record<string, unknown> = inner;
 
