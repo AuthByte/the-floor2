@@ -113,7 +113,7 @@ def fetch_earnings_digest(
                 EarningsDigestLLM,
                 agent_name=agent_id,
                 state=state,
-                default_factory=EarningsDigestLLM,
+                default_factory=lambda: EarningsDigestLLM(summary="Earnings summary unavailable."),
                 stream=True,
             )
             if isinstance(llm_out, EarningsDigestLLM):

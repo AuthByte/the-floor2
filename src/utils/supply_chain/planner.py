@@ -99,6 +99,48 @@ def build_supply_chain_graph(
     return graph, meta
 
 
+# Prompt is module-level so the prompt/schema contract is unit-testable.
+# The JSON shape below must stay aligned with SupplyChainGraphModel / ChainNode /
+# ChainEdge field names (label, region, criticality, title, caption, focal_ticker,
+# concentration_risks as strings); otherwise the LLM output fails validation and the
+# planner silently falls back to seeds.
+_PLANNER_PROMPT = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "You map corporate supply chains for investors. Build a realistic multi-tier "
+            "network: upstream suppliers (negative tier), focal company (tier 0), downstream "
+            "customers/partners (positive tier). Include materials, geographies, and competitors "
+            "where relevant. Use real company names when confident. Every edge must reference "
+            "valid node ids. JSON only.",
+        ),
+        (
+            "human",
+            "Ticker: {ticker}\n\nContext:\n{context}\n\n"
+            "Return JSON ONLY using EXACTLY these field names:\n"
+            "{{\n"
+            '  "title": "<short graph title>",\n'
+            '  "caption": "<one-sentence caption>",\n'
+            '  "focal_ticker": "{ticker}",\n'
+            '  "nodes": [{{"id": "<slug>", "label": "<entity name>", '
+            '"role": "focal|supplier|customer|material|geography|competitor", '
+            '"tier": <int -3..3>, "region": "<geography or null>", '
+            '"risk_note": "<short note or null>"}}],\n'
+            '  "edges": [{{"source": "<node id>", "target": "<node id>", '
+            '"relationship": "supplies|depends_on|distributes|competes|owns", '
+            '"criticality": "low|medium|high"}}],\n'
+            '  "concentration_risks": ["<short risk sentence>"]\n'
+            "}}\n\n"
+            "Rules: return {min_nodes}-22 nodes and 8-35 edges. Tier -3 = raw materials, "
+            "-2/-1 = suppliers, 0 = focal company (id should match the ticker slug, role 'focal'), "
+            "+1/+2 = customers/partners. Every edge source and target must reference a node id. "
+            "Use the field name 'label' (not 'name') and 'region' (not 'country'). "
+            "concentration_risks must be a list of short strings, not objects.",
+        ),
+    ]
+)
+
+
 def _invoke_planner(
     *,
     ticker: str,
@@ -107,27 +149,7 @@ def _invoke_planner(
     strict: bool,
 ) -> SupplyChainGraphModel | None:
     min_nodes = 8 if strict else 4
-    template = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                "You map corporate supply chains for investors. Build a realistic multi-tier "
-                "network: upstream suppliers (negative tier), focal company (tier 0), downstream "
-                "customers/partners (positive tier). Include materials, geographies, and competitors "
-                "where relevant. Use real company names when confident. Every edge must reference "
-                "valid node ids. JSON only.",
-            ),
-            (
-                "human",
-                "Ticker: {ticker}\n\nContext:\n{context}\n\n"
-                "Return {min_nodes}-22 nodes and 8-35 edges. Tier -3 = raw materials, -2/-1 = "
-                "suppliers, 0 = focal (id should match ticker slug), +1/+2 = customers. "
-                "Flag single-source risks in concentration_risks. "
-                "Focal node role must be 'focal' at tier 0.",
-            ),
-        ]
-    )
-    prompt = template.invoke({"ticker": ticker, "context": context, "min_nodes": min_nodes})
+    prompt = _PLANNER_PROMPT.invoke({"ticker": ticker, "context": context, "min_nodes": min_nodes})
     try:
         aux_model, aux_provider = resolve_aux_model(state, PLANNER_MODEL)
         llm = get_model(aux_model, aux_provider, _api_keys(state))
