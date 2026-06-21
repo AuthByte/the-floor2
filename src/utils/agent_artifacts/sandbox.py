@@ -131,6 +131,21 @@ class ChartCodeValidator(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+def normalize_chart_code(code: str) -> str:
+    """Recover code whose newlines were double-escaped inside a JSON string.
+
+    Several models return the ``code`` field as a single physical line full of
+    literal ``\\n``/``\\t`` sequences (double-escaped), which ``ast.parse`` rejects
+    with "unexpected character after line continuation character". Only unescape
+    when there are no real newlines, so genuine multi-line code is left untouched.
+    """
+    if not code or "\n" in code:
+        return code
+    if "\\n" in code:
+        code = code.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", "\t")
+    return code
+
+
 def validate_chart_code(code: str) -> str:
     text = (code or "").strip()
     if not text:
@@ -229,6 +244,7 @@ def build_sandbox_namespace(metrics_ctx: dict[str, Any]) -> dict[str, Any]:
 
 
 def _exec_chart_code(code: str, namespace: dict[str, Any]) -> Any:
+    code = normalize_chart_code(code)
     validate_chart_code(code)
     exec(code, namespace, namespace)  # noqa: S102 — sandboxed namespace
     fig = namespace.get("fig")
