@@ -2,21 +2,40 @@ import type { CompletePayload, HedgeFundRequest, ResolveTickersRequest, ResolveT
 
 import type { PaperAccountSnapshot, PaperPosition } from "./types";
 
-export const API_BASE_URL =
-  (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:8000";
+const LOCAL_API = "http://localhost:8000";
+
+function isLocalHostname(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+/** Resolved at call time so deployed builds never pin localhost from stale bundles. */
+export function getApiBaseUrl(): string {
+  const configured = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+  if (configured) return configured;
+
+  if (typeof window !== "undefined") {
+    return isLocalHostname(window.location.hostname) ? LOCAL_API : "";
+  }
+
+  return import.meta.env.DEV ? LOCAL_API : "";
+}
+
+/** @deprecated Prefer getApiBaseUrl() — evaluated per call in fetch helpers below. */
+export const API_BASE_URL = "";
 
 /** Prefix relative backend URLs (e.g. /artifacts/...) with the API base. */
 export function resolveBackendUrl(path: string): string {
   if (!path) return path;
   if (/^https?:\/\//i.test(path)) return path;
-  return `${API_BASE_URL}${path.startsWith("/") ? "" : "/"}${path}`;
+  const base = getApiBaseUrl();
+  return `${base}${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
 export async function fetchPaperAccount(): Promise<{
   account: PaperAccountSnapshot;
   positions: PaperPosition[];
 }> {
-  const res = await fetch(`${API_BASE_URL}/hedge-fund/paper-account`);
+  const res = await fetch(`${getApiBaseUrl()}/hedge-fund/paper-account`);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(text || `HTTP ${res.status}`);
@@ -43,7 +62,7 @@ export interface StreamHandlers {
 export async function resolveTickers(
   req: ResolveTickersRequest,
 ): Promise<ResolveTickersResponse> {
-  const res = await fetch(`${API_BASE_URL}/hedge-fund/resolve-tickers`, {
+  const res = await fetch(`${getApiBaseUrl()}/hedge-fund/resolve-tickers`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
@@ -67,7 +86,7 @@ export function runHedgeFund(req: HedgeFundRequest, handlers: StreamHandlers) {
 
   (async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/hedge-fund/run`, {
+      const res = await fetch(`${getApiBaseUrl()}/hedge-fund/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
@@ -163,7 +182,7 @@ export async function postDebateInterjection(body: {
   message: string;
   chair_name?: string;
 }): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/hedge-fund/debate-interject`, {
+  const res = await fetch(`${getApiBaseUrl()}/hedge-fund/debate-interject`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
