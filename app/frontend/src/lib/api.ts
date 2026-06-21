@@ -12,6 +12,29 @@ export function resolveBackendUrl(path: string): string {
   return `${API_BASE_URL}${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
+export interface OllamaStatus {
+  installed: boolean;
+  running: boolean;
+  available_models: string[];
+}
+
+/**
+ * Fetch local Ollama status from the backend. Returns an empty/offline status
+ * when Ollama is not installed or the request fails, so the UI degrades
+ * gracefully and simply hides the local-model options.
+ */
+export async function fetchOllamaModels(): Promise<string[]> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/ollama/status`);
+    if (!res.ok) return [];
+    const data = (await res.json()) as Partial<OllamaStatus>;
+    if (!data.installed || !data.running) return [];
+    return Array.isArray(data.available_models) ? data.available_models : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchPaperAccount(): Promise<{
   account: PaperAccountSnapshot;
   positions: PaperPosition[];

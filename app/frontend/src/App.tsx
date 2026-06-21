@@ -47,7 +47,9 @@ import {
 
 import { DEBATE_ROOM_ID } from "./lib/layout";
 
-import { DEFAULT_MODEL, OPENROUTER_MODELS } from "./lib/models";
+import { DEFAULT_MODEL, OLLAMA_PROVIDER, OPENROUTER_MODELS, providerForModel } from "./lib/models";
+
+import { fetchOllamaModels } from "./lib/api";
 
 import { loadShiftLedger, saveShiftRecord } from "./lib/shiftLedger";
 import { buildShiftTimeline, snapshotAtTime } from "./lib/shiftReplay";
@@ -130,6 +132,10 @@ export default function App() {
   );
 
   const [model, setModel] = useState<string>(initialModel);
+
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+
+  const provider = providerForModel(model, ollamaModels);
 
   const [initialCash, setInitialCash] = useState<number>(100000);
 
@@ -221,6 +227,26 @@ export default function App() {
     };
 
   }, [theme]);
+
+
+
+  useEffect(() => {
+
+    let cancelled = false;
+
+    void fetchOllamaModels().then((models) => {
+
+      if (!cancelled) setOllamaModels(models);
+
+    });
+
+    return () => {
+
+      cancelled = true;
+
+    };
+
+  }, []);
 
 
 
@@ -700,6 +726,10 @@ export default function App() {
 
         onModelChange={setModel}
 
+        provider={provider}
+
+        ollamaModels={ollamaModels}
+
         initialCash={initialCash}
 
         onCashChange={setInitialCash}
@@ -746,6 +776,7 @@ export default function App() {
           void floor.start({
             tickers,
             model,
+            provider,
             initialCash,
             openrouterKey,
             alpacaPaper,
@@ -810,7 +841,7 @@ export default function App() {
 
             enabledCount={roster.enabledCount}
 
-            hasApiKey={openrouterKey.trim().length > 0}
+            hasApiKey={provider === OLLAMA_PROVIDER || openrouterKey.trim().length > 0}
 
           />
 

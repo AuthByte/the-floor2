@@ -26,7 +26,7 @@ import {
 import { resolveProgressRoomId } from "../lib/progressRoomId";
 import { resolveTickers, runHedgeFund } from "../lib/api";
 import { parseWatchlistInput } from "../lib/tickerInput";
-import { PROVIDER } from "../lib/models";
+import { OLLAMA_PROVIDER } from "../lib/models";
 import type {
   CompletePayload,
   GraphEdge,
@@ -70,6 +70,8 @@ export function buildInitialRooms(): Record<string, RoomState> {
 export interface FloorOptions {
   tickers: string;
   model: string;
+  /** Backend model provider, e.g. "OpenRouter" or "Ollama". */
+  provider: string;
   initialCash: number;
   openrouterKey: string;
   alpacaPaper: boolean;
@@ -191,6 +193,7 @@ export function useFloor(): FloorController {
     async ({
       tickers,
       model,
+      provider,
       initialCash,
       openrouterKey,
       alpacaPaper,
@@ -218,8 +221,23 @@ export function useFloor(): FloorController {
         return;
       }
 
-      if (!openrouterKey.trim()) {
+      // Local providers (Ollama) run without a cloud key. OpenRouter models
+      // still require one to authenticate the shift.
+      const isLocalProvider = provider === OLLAMA_PROVIDER;
+      const hasOpenrouterKey = openrouterKey.trim().length > 0;
+      if (!isLocalProvider && !hasOpenrouterKey) {
         setErrorMsg("openrouter key required to resolve symbols and run the shift.");
+        setRunState("error");
+        return;
+      }
+
+      // Natural-language ticker resolution is served by an OpenRouter model on
+      // the backend, so it needs a key even when the shift runs locally.
+      const needsResolution = parseWatchlistInput(query).kind !== "direct";
+      if (isLocalProvider && !hasOpenrouterKey && needsResolution) {
+        setErrorMsg(
+          "local models can't resolve natural-language watchlists — enter ticker symbols directly (e.g. AAPL, MSFT).",
+        );
         setRunState("error");
         return;
       }
@@ -401,7 +419,7 @@ export function useFloor(): FloorController {
           graph_nodes: graphNodes,
           graph_edges: graphEdges,
           model_name: model,
-          model_provider: PROVIDER,
+          model_provider: provider,
           initial_cash: initialCash,
           margin_requirement: 0,
           execute_alpaca_paper: alpacaPaper,

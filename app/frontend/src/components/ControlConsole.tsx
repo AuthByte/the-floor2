@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { OPENROUTER_MODELS } from "../lib/models";
+import { OLLAMA_PROVIDER, OPENROUTER_MODELS, ollamaPreset } from "../lib/models";
 import type { RunState } from "../lib/types";
 import { parseWatchlistInput } from "../lib/tickerInput";
 import { WATCHLIST_PRESETS } from "../lib/watchlists";
@@ -9,6 +9,8 @@ interface Props {
   onTickersChange: (v: string) => void;
   model: string;
   onModelChange: (v: string) => void;
+  provider: string;
+  ollamaModels: string[];
   initialCash: number;
   onCashChange: (v: number) => void;
   openrouterKey: string;
@@ -68,9 +70,11 @@ export function ControlConsole(p: Props) {
 
   const isRunning = p.runState === "running";
   const isResolving = Boolean(p.resolvingTickers);
+  const isLocalProvider = p.provider === OLLAMA_PROVIDER;
+  const needsKey = !isLocalProvider;
   const canStart =
     p.tickers.trim().length > 0 &&
-    p.openrouterKey.trim().length > 0 &&
+    (!needsKey || p.openrouterKey.trim().length > 0) &&
     p.enabledAnalystCount > 0 &&
     !isRunning &&
     !isResolving;
@@ -79,13 +83,21 @@ export function ControlConsole(p: Props) {
     if (canStart || isRunning || isResolving) return [];
     const blockers: string[] = [];
     if (!p.tickers.trim()) blockers.push("Enter tickers or describe a watchlist");
-    if (!p.openrouterKey.trim()) blockers.push("Add OpenRouter key (unshelve keys below)");
+    if (needsKey && !p.openrouterKey.trim())
+      blockers.push("Add OpenRouter key (unshelve keys below)");
     if (p.enabledAnalystCount === 0) blockers.push("Enable analysts in Manage Roster");
     return blockers;
-  }, [canStart, isRunning, isResolving, p.tickers, p.openrouterKey, p.enabledAnalystCount]);
+  }, [canStart, isRunning, isResolving, needsKey, p.tickers, p.openrouterKey, p.enabledAnalystCount]);
+
+  const ollamaPresets = useMemo(
+    () => p.ollamaModels.map((name) => ollamaPreset(name)),
+    [p.ollamaModels],
+  );
 
   const activeModel =
-    OPENROUTER_MODELS.find((m) => m.id === p.model)?.label ?? p.model;
+    OPENROUTER_MODELS.find((m) => m.id === p.model)?.label ??
+    ollamaPresets.find((m) => m.id === p.model)?.label ??
+    p.model;
 
   return (
     <section className="relative z-10 border-b border-wire-800/80 bg-ink-900/80 backdrop-blur-md">
@@ -97,7 +109,7 @@ export function ControlConsole(p: Props) {
           tickerRef={tickerRef}
         />
 
-        <Field label="model" hint="openrouter">
+        <Field label="model" hint={isLocalProvider ? "ollama · local" : "openrouter"}>
           <div ref={popRef} className="relative w-full">
             <button
               type="button"
@@ -109,34 +121,34 @@ export function ControlConsole(p: Props) {
             </button>
             {menuOpen && (
               <div className="absolute left-0 right-0 top-full z-40 mt-3 max-h-72 overflow-auto rounded-lg border border-wire-700 bg-ink-950/98 p-1 shadow-float backdrop-blur-md">
-                {OPENROUTER_MODELS.map((m) => {
-                  const active = m.id === p.model;
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => {
-                        p.onModelChange(m.id);
-                        setMenuOpen(false);
-                      }}
-                      className={`flex w-full items-center justify-between gap-4 rounded-md px-3 py-2 text-left text-xs tracking-[0.04em] transition ${
-                        active
-                          ? "bg-brass/10 text-brass"
-                          : "text-wire-200 hover:bg-wire-900/70"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2 truncate">
-                        <span
-                          className={`h-1.5 w-1.5 rounded-full ${active ? "bg-brass" : "bg-wire-700"}`}
-                        />
-                        {m.label}
-                      </span>
-                      <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.2em] text-wire-600">
-                        {m.hint}
-                      </span>
-                    </button>
-                  );
-                })}
+                <ModelGroup label="OpenRouter" hint="cloud" />
+                {OPENROUTER_MODELS.map((m) => (
+                  <ModelRow
+                    key={m.id}
+                    preset={m}
+                    active={m.id === p.model}
+                    onPick={() => {
+                      p.onModelChange(m.id);
+                      setMenuOpen(false);
+                    }}
+                  />
+                ))}
+                {ollamaPresets.length > 0 ? (
+                  <>
+                    <ModelGroup label="Local · Ollama" hint="no key" />
+                    {ollamaPresets.map((m) => (
+                      <ModelRow
+                        key={m.id}
+                        preset={m}
+                        active={m.id === p.model}
+                        onPick={() => {
+                          p.onModelChange(m.id);
+                          setMenuOpen(false);
+                        }}
+                      />
+                    ))}
+                  </>
+                ) : null}
               </div>
             )}
           </div>
@@ -467,6 +479,49 @@ function Field({
         <span className="ml-1 inline-block h-3.5 w-[2px] bg-brass/80 opacity-0 transition-opacity group-focus-within:animate-blink group-focus-within:opacity-100" />
       </div>
     </label>
+  );
+}
+
+function ModelGroup({ label, hint }: { label: string; hint: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 pb-1 pt-2 first:pt-1">
+      <span className="text-[9px] font-semibold uppercase tracking-[0.28em] text-wire-500">
+        {label}
+      </span>
+      <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-wire-700">
+        {hint}
+      </span>
+    </div>
+  );
+}
+
+function ModelRow({
+  preset,
+  active,
+  onPick,
+}: {
+  preset: { id: string; label: string; hint: string };
+  active: boolean;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      className={`flex w-full items-center justify-between gap-4 rounded-md px-3 py-2 text-left text-xs tracking-[0.04em] transition ${
+        active ? "bg-brass/10 text-brass" : "text-wire-200 hover:bg-wire-900/70"
+      }`}
+    >
+      <span className="flex items-center gap-2 truncate">
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${active ? "bg-brass" : "bg-wire-700"}`}
+        />
+        {preset.label}
+      </span>
+      <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.2em] text-wire-600">
+        {preset.hint}
+      </span>
+    </button>
   );
 }
 
