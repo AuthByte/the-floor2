@@ -10,6 +10,7 @@ on:
       - "poetry.lock"
       - "docker/Dockerfile.api"
       - ".aws/task-definition.json"
+  workflow_dispatch:
 
 env:
   AWS_REGION: us-east-1
