@@ -23,6 +23,9 @@ import { ShiftPhaseRail } from "./components/ShiftPhaseRail";
 import { FloorIdleHint } from "./components/FloorIdleHint";
 import { ShortcutsPanel } from "./components/ShortcutsPanel";
 
+import { useAuth } from "./contexts/AuthContext";
+import { useUserData } from "./contexts/UserDataContext";
+
 import { useAgentSelection } from "./hooks/useAgentSelection";
 
 import { useFloor } from "./hooks/useFloor";
@@ -49,7 +52,6 @@ import { DEBATE_ROOM_ID } from "./lib/layout";
 
 import { DEFAULT_MODEL, OPENROUTER_MODELS } from "./lib/models";
 
-import { loadShiftLedger, saveShiftRecord } from "./lib/shiftLedger";
 import { buildShiftTimeline, snapshotAtTime } from "./lib/shiftReplay";
 
 import { countArtifacts } from "./lib/parseAgentAnalysis";
@@ -120,6 +122,8 @@ function isTypingTarget(el: EventTarget | null): boolean {
 export default function App() {
 
   const floor = useFloor();
+  const { configured: authConfigured, user, signOut, session } = useAuth();
+  const userData = useUserData();
 
   const roster = useAgentSelection();
 
@@ -200,9 +204,15 @@ export default function App() {
   const [weatherOpen, setWeatherOpen] = useState(false);
   const [replayCursor, setReplayCursor] = useState(0);
 
-  const [ledgerCount, setLedgerCount] = useState(() => loadShiftLedger().length);
+  const [settingsHydrated, setSettingsHydrated] = useState(false);
 
   const [theme, setTheme] = useState<Theme>(initialTheme);
+
+
+
+  useEffect(() => {
+    setSettingsHydrated(false);
+  }, [session?.user.id]);
 
 
 
@@ -221,6 +231,52 @@ export default function App() {
     };
 
   }, [theme]);
+
+
+
+  useEffect(() => {
+    if (!userData.ready || settingsHydrated) return;
+    const s = userData.settings;
+    if (s.tickers) setTickers(s.tickers);
+    if (s.model) setModel(s.model);
+    if (s.theme) setTheme(s.theme);
+    if (s.initialCash != null) setInitialCash(s.initialCash);
+    if (s.alpacaPaper != null) setAlpacaPaper(s.alpacaPaper);
+    if (s.runRiskPipeline != null) setRunRiskPipeline(s.runRiskPipeline);
+    if (s.memoEmail != null) setMemoEmail(s.memoEmail);
+    if (s.digestEmail != null) setDigestEmail(s.digestEmail);
+    if (s.enabledAgents?.length) roster.replaceEnabled(s.enabledAgents);
+    setSettingsHydrated(true);
+  }, [userData.ready, userData.settings, settingsHydrated, roster]);
+
+
+
+  useEffect(() => {
+    if (!settingsHydrated) return;
+    userData.updateSettings({
+      model,
+      tickers,
+      theme,
+      initialCash,
+      enabledAgents: roster.enabledKeys,
+      alpacaPaper,
+      runRiskPipeline,
+      memoEmail,
+      digestEmail,
+    });
+  }, [
+    settingsHydrated,
+    model,
+    tickers,
+    theme,
+    initialCash,
+    roster.enabledKeys,
+    alpacaPaper,
+    runRiskPipeline,
+    memoEmail,
+    digestEmail,
+    userData,
+  ]);
 
 
 
@@ -283,7 +339,9 @@ export default function App() {
 
     archivedPayloadRef.current = floor.decisions;
 
-    saveShiftRecord({
+    const startedAt = floor.shiftStartedAt ?? Date.now();
+
+    void userData.saveShift({
 
       tickers,
 
@@ -295,15 +353,33 @@ export default function App() {
 
       payload: floor.decisions,
 
-    });
+      replay: {
 
-    setLedgerCount(loadShiftLedger().length);
+        shiftStartedAt: startedAt,
+
+        timeline: buildShiftTimeline(floor.rooms, floor.log, startedAt),
+
+        roomIds: Object.keys(floor.rooms),
+
+        log: floor.log,
+
+      },
+
+      runId: floor.shiftRunId,
+
+    });
 
   }, [
 
     floor.runState,
 
     floor.decisions,
+
+    floor.rooms,
+
+    floor.log,
+
+    floor.shiftStartedAt,
 
     tickers,
 
@@ -312,6 +388,8 @@ export default function App() {
     initialCash,
 
     roster.enabledCount,
+
+    userData,
 
   ]);
 
@@ -652,7 +730,7 @@ export default function App() {
             : tickers
         }
 
-        ledgerCount={ledgerCount}
+        ledgerCount={userData.shifts.length}
 
         onOpenLedger={() => setLedgerOpen(true)}
 
@@ -669,6 +747,9 @@ export default function App() {
         theme={theme}
 
         onToggleTheme={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+
+        userEmail={authConfigured ? user?.email ?? null : null}
+        onSignOut={authConfigured ? signOut : undefined}
 
       />
 
@@ -695,6 +776,8 @@ export default function App() {
         tickers={tickers}
 
         onTickersChange={setTickers}
+
+        extraWatchlists={userData.watchlists}
 
         model={model}
 
@@ -861,17 +944,12 @@ export default function App() {
           />
 
           <ShiftLedgerPanel
-
             open={ledgerOpen}
-
-            onClose={() => {
-
-              setLedgerOpen(false);
-
-              setLedgerCount(loadShiftLedger().length);
-
-            }}
-
+            onClose={() => setLedgerOpen(false)}
+            entries={userData.shifts}
+            onDelete={(id) => void userData.deleteShift(id)}
+            onClearAll={() => void userData.clearShifts()}
+            cloudSynced={userData.cloud}
           />
 
         </div>
@@ -912,6 +990,8 @@ export default function App() {
         onSetNamedTier={(on) => roster.setTier(roster.namedKeys, on)}
 
         onSetSpecialistTier={(on) => roster.setTier(roster.specialistKeys, on)}
+
+        onSetQuantTier={(on) => roster.setTier(roster.quantKeys, on)}
 
         runState={floor.runState}
 

@@ -4,6 +4,25 @@ import type { PaperAccountSnapshot, PaperPosition } from "./types";
 
 const LOCAL_API = "http://localhost:8000";
 
+type TokenGetter = () => Promise<string | null>;
+
+let authTokenGetter: TokenGetter | null = null;
+
+export function setAuthTokenGetter(getter: TokenGetter | null) {
+  authTokenGetter = getter;
+}
+
+async function authHeaders(
+  extra: Record<string, string> = {},
+): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { ...extra };
+  if (authTokenGetter) {
+    const token = await authTokenGetter();
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 function isLocalHostname(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1";
 }
@@ -35,7 +54,9 @@ export async function fetchPaperAccount(): Promise<{
   account: PaperAccountSnapshot;
   positions: PaperPosition[];
 }> {
-  const res = await fetch(`${getApiBaseUrl()}/hedge-fund/paper-account`);
+  const res = await fetch(`${getApiBaseUrl()}/hedge-fund/paper-account`, {
+    headers: await authHeaders(),
+  });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(text || `HTTP ${res.status}`);
@@ -64,7 +85,7 @@ export async function resolveTickers(
 ): Promise<ResolveTickersResponse> {
   const res = await fetch(`${getApiBaseUrl()}/hedge-fund/resolve-tickers`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(req),
   });
   if (!res.ok) {
@@ -88,7 +109,7 @@ export function runHedgeFund(req: HedgeFundRequest, handlers: StreamHandlers) {
     try {
       const res = await fetch(`${getApiBaseUrl()}/hedge-fund/run`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(req),
         signal: controller.signal,
       });
@@ -184,7 +205,7 @@ export async function postDebateInterjection(body: {
 }): Promise<void> {
   const res = await fetch(`${getApiBaseUrl()}/hedge-fund/debate-interject`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: await authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!res.ok) {

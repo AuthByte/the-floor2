@@ -1,4 +1,5 @@
 import type { CompletePayload, FinalDecisionAction } from "./types";
+import type { ShiftReplayArchive } from "./userData/types";
 
 const STORAGE_KEY = "floor.shiftLedger";
 const MAX_ENTRIES = 40;
@@ -19,6 +20,8 @@ export interface ShiftRecord {
   decisions: Record<string, FinalDecisionAction> | null;
   prices: Record<string, number> | null;
   summary: ShiftSummaryLine[];
+  payload?: CompletePayload | null;
+  replay?: ShiftReplayArchive | null;
 }
 
 export interface SaveShiftInput {
@@ -27,6 +30,7 @@ export interface SaveShiftInput {
   initialCash: number;
   analystCount: number;
   payload: CompletePayload;
+  replay?: ShiftReplayArchive | null;
 }
 
 function parseSummary(
@@ -41,6 +45,13 @@ function parseSummary(
         ? Math.round(Math.max(0, Math.min(100, d.confidence)))
         : null,
   }));
+}
+
+/** Exported for userData local builder. */
+export function parseSummaryFromDecisions(
+  decisions: Record<string, FinalDecisionAction> | null,
+): ShiftSummaryLine[] {
+  return parseSummary(decisions);
 }
 
 export function loadShiftLedger(): ShiftRecord[] {
@@ -81,6 +92,8 @@ export function saveShiftRecord(input: SaveShiftInput): ShiftRecord {
     decisions,
     prices: input.payload.current_prices ?? null,
     summary: parseSummary(decisions),
+    payload: input.payload,
+    replay: input.replay ?? null,
   };
   const next = [record, ...loadShiftLedger()].slice(0, MAX_ENTRIES);
   persist(next);
