@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { DATA_ANALYSTS, NAMED_ANALYSTS, SPECIALIST_ANALYSTS } from "../lib/agents";
+import { DATA_ANALYSTS, NAMED_ANALYSTS, SPECIALIST_ANALYSTS, QUANT_ANALYSTS } from "../lib/agents";
 import {
   defaultEnabledKeys,
   loadEnabledKeys,
@@ -44,6 +44,15 @@ export function useAgentSelection() {
     setEnabled(defaultEnabledKeys());
   }, []);
 
+  const replaceEnabled = useCallback((keys: Iterable<string>) => {
+    const next = new Set(keys);
+    if (next.size === 0) {
+      setEnabled(defaultEnabledKeys());
+      return;
+    }
+    setEnabled(next);
+  }, []);
+
   const disableAllExceptOne = useCallback(() => {
     setEnabled(new Set([TOGGLEABLE_ANALYST_KEYS[0]]));
   }, []);
@@ -64,6 +73,10 @@ export function useAgentSelection() {
     () => SPECIALIST_ANALYSTS.map((a) => a.key),
     [],
   );
+  const quantKeys = useMemo(
+    () => QUANT_ANALYSTS.map((a) => a.key),
+    [],
+  );
 
   return {
     enabled,
@@ -73,9 +86,11 @@ export function useAgentSelection() {
     toggle,
     setTier,
     enableAll,
+    replaceEnabled,
     disableAllExceptOne,
     dataKeys,
     namedKeys,
     specialistKeys,
+    quantKeys,
   };
 }

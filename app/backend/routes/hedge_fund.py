@@ -1,9 +1,11 @@
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import asyncio
 import logging
 
+from app.backend.auth.deps import hedge_fund_auth_dependencies, require_user, user_id_from_claims, _bearer
 from app.backend.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -28,7 +30,6 @@ from app.backend.models.events import StartEvent, ProgressUpdateEvent, ErrorEven
 from app.backend.services.graph import create_graph, parse_hedge_fund_response, run_graph_async
 from app.backend.services.portfolio import create_portfolio
 from app.backend.services.backtest_service import BacktestService
-from app.backend.services.api_key_service import ApiKeyService
 from app.backend.services.alpaca_paper import (
     AlpacaPaperClient,
     compact_account,
@@ -36,6 +37,7 @@ from app.backend.services.alpaca_paper import (
     is_alpaca_configured,
     run_alpaca_paper_execution,
 )
+from app.backend.services.shift_archive import archive_shift_to_supabase
 from app.backend.services.memo_email import is_resend_configured, send_memo_digest
 from src.utils.progress import progress
 from src.utils.analysts import get_agents_list
@@ -51,10 +53,20 @@ from src.utils.ticker_resolve import (
     parse_direct_tickers,
     resolve_tickers_from_query,
 )
+from src.tools.providers.keys import active_keys_dict, merge_api_keys
 import json
 import secrets
 
-router = APIRouter(prefix="/hedge-fund")
+router = APIRouter(
+    prefix="/hedge-fund",
+    dependencies=hedge_fund_auth_dependencies(),
+)
+
+
+def _hydrate_request_api_keys(request_data, db: Session | None = None) -> None:
+    """Merge .env + request overrides so every agent sees the full key set."""
+    explicit = request_data.api_keys
+    request_data.api_keys = active_keys_dict(merge_api_keys(explicit))
 
 
 def _prepare_shift_tickers(request_data: HedgeFundRequest) -> list[str]:
@@ -90,12 +102,9 @@ def _prepare_shift_tickers(request_data: HedgeFundRequest) -> list[str]:
 )
 async def resolve_tickers(
     request_data: ResolveTickersRequest,
-    db: Session = Depends(get_db),
 ):
     try:
-        if not request_data.api_keys:
-            api_key_service = ApiKeyService(db)
-            request_data.api_keys = api_key_service.get_api_keys_dict()
+        _hydrate_request_api_keys(request_data)
 
         query = request_data.query.strip()
         direct = parse_direct_tickers(query, max_count=request_data.max_tickers)
@@ -133,12 +142,16 @@ async def resolve_tickers(
         500: {"model": ErrorResponse, "description": "Internal server error"},
     },
 )
-async def run(request_data: HedgeFundRequest, request: Request, db: Session = Depends(get_db)):
+async def run(
+    request_data: HedgeFundRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    user_claims: dict | None = Depends(require_user),
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+):
     try:
-        # Hydrate API keys from database if not provided
-        if not request_data.api_keys:
-            api_key_service = ApiKeyService(db)
-            request_data.api_keys = api_key_service.get_api_keys_dict()
+        _hydrate_request_api_keys(request_data)
+        access_token = credentials.credentials if credentials else None
 
         shift_tickers = _prepare_shift_tickers(request_data)
         request_data.tickers = shift_tickers
@@ -218,7 +231,8 @@ async def run(request_data: HedgeFundRequest, request: Request, db: Session = De
 
             # Scope agent-generated chart artifacts to this shift and sweep stale runs.
             run_id = secrets.token_hex(6)
-            set_run_artifact_root(run_id)
+            shift_user_id = user_id_from_claims(user_claims)
+            set_run_artifact_root(run_id, shift_user_id, access_token)
             bind_run(run_id)
             try:
                 cleanup_old_runs()
@@ -416,6 +430,17 @@ async def run(request_data: HedgeFundRequest, request: Request, db: Session = De
                                 "error": str(exc),
                             }
 
+                if shift_user_id:
+                    archive_shift_to_supabase(
+                        user_id=shift_user_id,
+                        run_id=run_id,
+                        tickers=request_data.tickers,
+                        model=request_data.model_name,
+                        initial_cash=float(request_data.initial_cash),
+                        analyst_count=len(request_data.graph_nodes),
+                        payload=complete_payload,
+                    )
+
                 # Send the final result
                 final_data = CompleteEvent(data=complete_payload)
                 yield final_data.to_sse()
@@ -426,7 +451,10 @@ async def run(request_data: HedgeFundRequest, request: Request, db: Session = De
             finally:
                 # Clean up
                 progress.unregister_handler(progress_handler)
-                set_run_artifact_root(None)
+                set_run_artifact_root(None, None, None)
+                from app.backend.services.supabase_client import set_user_access_token
+
+                set_user_access_token(None)
                 clear_run(run_id)
                 if run_task and not run_task.done():
                     run_task.cancel()
@@ -458,10 +486,7 @@ async def run(request_data: HedgeFundRequest, request: Request, db: Session = De
 async def backtest(request_data: BacktestRequest, request: Request, db: Session = Depends(get_db)):
     """Run a continuous backtest over a time period with streaming updates."""
     try:
-        # Hydrate API keys from database if not provided
-        if not request_data.api_keys:
-            api_key_service = ApiKeyService(db)
-            request_data.api_keys = api_key_service.get_api_keys_dict()
+        _hydrate_request_api_keys(request_data, db)
 
         # Convert model_provider to string if it's an enum
         model_provider = request_data.model_provider

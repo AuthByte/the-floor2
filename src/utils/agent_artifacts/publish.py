@@ -35,17 +35,76 @@ TTL_SECONDS = 24 * 60 * 60
 _SAFE_SEGMENT = re.compile(r"[^A-Za-z0-9._-]+")
 
 _current_run_id: str | None = None
+_current_user_id: str | None = None
 
 
-def set_run_artifact_root(run_id: str | None) -> None:
+def set_run_artifact_root(
+    run_id: str | None, user_id: str | None = None, access_token: str | None = None
+) -> None:
     """Called once per shift to scope artifact paths."""
-    global _current_run_id
+    global _current_run_id, _current_user_id
     _current_run_id = _safe_segment(run_id) if run_id else None
+    _current_user_id = _safe_segment(user_id) if user_id else None
+    if access_token:
+        try:
+            from app.backend.services.supabase_client import set_user_access_token
+
+            set_user_access_token(access_token)
+        except Exception:
+            pass
+
+
+def get_run_context() -> tuple[str | None, str | None]:
+    return _current_run_id, _current_user_id
 
 
 def _safe_segment(value: str) -> str:
     cleaned = _SAFE_SEGMENT.sub("_", value or "").strip("._-")
     return cleaned or "default"
+
+
+def _persist_png(
+    out_dir: Path,
+    filename: str,
+    png: bytes,
+    *,
+    agent_id: str,
+    ticker: str,
+) -> str:
+    """Write artifact bytes and return a URL (Supabase Storage or local /artifacts)."""
+    run = _current_run_id or "_unscoped"
+    user = _current_user_id or "anon"
+    storage_path = f"{user}/{run}/{_safe_segment(agent_id)}/{_safe_segment(ticker)}/{filename}"
+
+    use_storage = (os.getenv("SUPABASE_URL") or "").strip() and (
+        (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+        or (os.getenv("SUPABASE_ANON_KEY") or "").strip()
+    )
+    if use_storage:
+        try:
+            from app.backend.services.supabase_client import get_supabase
+
+            sb = get_supabase()
+            if sb.configured:
+                public_url = sb.upload_artifact(storage_path, png)
+                if _current_user_id and _current_run_id:
+                    sb.insert_artifact_file(
+                        {
+                            "user_id": _current_user_id,
+                            "run_id": _current_run_id,
+                            "agent_id": agent_id,
+                            "ticker": ticker,
+                            "artifact_id": filename.rsplit(".", 1)[0],
+                            "storage_path": storage_path,
+                            "public_url": public_url,
+                        }
+                    )
+                return public_url
+        except Exception as exc:
+            logger.warning("Supabase artifact upload failed, using local disk: %s", exc)
+
+    (out_dir / filename).write_bytes(png)
+    return f"{URL_PREFIX}/{run}/{_safe_segment(agent_id)}/{_safe_segment(ticker)}/{filename}"
 
 
 def _ensure_dir(*parts: str) -> Path:
@@ -121,9 +180,9 @@ def attach_artifacts(
             width, height = figure_pixel_size(fig)
             png = figure_to_png_bytes(fig)
             filename = f"{_safe_segment(CUSTOM_CHART_ID)}.png"
-            (out_dir / filename).write_bytes(png)
-            run = _current_run_id or "_unscoped"
-            url = f"{URL_PREFIX}/{run}/{_safe_segment(agent_id)}/{_safe_segment(ticker)}/{filename}"
+            url = _persist_png(
+                out_dir, filename, png, agent_id=agent_id, ticker=ticker
+            )
             artifacts.append(
                 ArtifactMeta(
                     id=CUSTOM_CHART_ID,
@@ -151,9 +210,9 @@ def attach_artifacts(
             width, height = figure_pixel_size(fig)
             png = figure_to_png_bytes(fig)
             filename = f"{_safe_segment(pick.id)}.png"
-            (out_dir / filename).write_bytes(png)
-            run = _current_run_id or "_unscoped"
-            url = f"{URL_PREFIX}/{run}/{_safe_segment(agent_id)}/{_safe_segment(ticker)}/{filename}"
+            url = _persist_png(
+                out_dir, filename, png, agent_id=agent_id, ticker=ticker
+            )
             artifacts.append(
                 ArtifactMeta(
                     id=pick.id,

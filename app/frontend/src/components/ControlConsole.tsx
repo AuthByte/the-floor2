@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { OPENROUTER_MODELS } from "../lib/models";
 import type { RunState } from "../lib/types";
 import { parseWatchlistInput } from "../lib/tickerInput";
-import { WATCHLIST_PRESETS } from "../lib/watchlists";
+import { WATCHLIST_PRESETS, type WatchlistPreset } from "../lib/watchlists";
 
 interface Props {
   tickers: string;
   onTickersChange: (v: string) => void;
+  extraWatchlists?: WatchlistPreset[];
   model: string;
   onModelChange: (v: string) => void;
   initialCash: number;
@@ -84,6 +85,11 @@ export function ControlConsole(p: Props) {
     return blockers;
   }, [canStart, isRunning, isResolving, p.tickers, p.openrouterKey, p.enabledAnalystCount]);
 
+  const watchlistPresets = useMemo(
+    () => [...WATCHLIST_PRESETS, ...(p.extraWatchlists ?? [])],
+    [p.extraWatchlists],
+  );
+
   const activeModel =
     OPENROUTER_MODELS.find((m) => m.id === p.model)?.label ?? p.model;
 
@@ -95,6 +101,7 @@ export function ControlConsole(p: Props) {
           onTickersChange={p.onTickersChange}
           disabled={isRunning}
           tickerRef={tickerRef}
+          watchlistPresets={watchlistPresets}
         />
 
         <Field label="model" hint="openrouter">
@@ -378,11 +385,13 @@ function TickerField({
   onTickersChange,
   disabled,
   tickerRef,
+  watchlistPresets,
 }: {
   tickers: string;
   onTickersChange: (v: string) => void;
   disabled: boolean;
   tickerRef: React.RefObject<HTMLInputElement>;
+  watchlistPresets: WatchlistPreset[];
 }) {
   const mode = useMemo(() => parseWatchlistInput(tickers), [tickers]);
   const modeHint =
@@ -423,7 +432,7 @@ function TickerField({
       </div>
       {!disabled ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {WATCHLIST_PRESETS.map((preset) => (
+          {watchlistPresets.map((preset) => (
             <button
               key={preset.id}
               type="button"

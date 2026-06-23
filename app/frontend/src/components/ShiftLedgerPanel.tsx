@@ -1,15 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ShiftRecord } from "../lib/shiftLedger";
-import {
-  clearShiftLedger,
-  deleteShiftRecord,
-  formatShiftDate,
-  loadShiftLedger,
-} from "../lib/shiftLedger";
+import { formatShiftDate } from "../lib/shiftLedger";
 
 interface Props {
   open: boolean;
   onClose: () => void;
+  entries: ShiftRecord[];
+  onDelete: (id: string) => void;
+  onClearAll: () => void;
+  cloudSynced?: boolean;
 }
 
 const ACTION_CHIP: Record<string, string> = {
@@ -28,14 +27,15 @@ const ACTION_TEXT: Record<string, string> = {
   hold: "text-amber",
 };
 
-export function ShiftLedgerPanel({ open, onClose }: Props) {
-  const [entries, setEntries] = useState<ShiftRecord[]>(() => loadShiftLedger());
+export function ShiftLedgerPanel({
+  open,
+  onClose,
+  entries,
+  onDelete,
+  onClearAll,
+  cloudSynced = false,
+}: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    setEntries(loadShiftLedger());
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -45,6 +45,14 @@ export function ShiftLedgerPanel({ open, onClose }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  const archiveHint = useMemo(
+    () =>
+      cloudSynced
+        ? "Completed shifts sync to your account. Boss memos, replay data, and full payloads stay archived after you reset the floor."
+        : "Completed shifts saved on this browser. Boss memos and verdicts stay here after you reset the floor.",
+    [cloudSynced],
+  );
 
   if (!open) return null;
 
@@ -73,10 +81,7 @@ export function ShiftLedgerPanel({ open, onClose }: Props) {
               >
                 Shift Ledger
               </h2>
-              <p className="mt-1 text-[11px] text-wire-500">
-                Completed shifts saved on this browser. Boss memos and verdicts
-                stay here after you reset the floor.
-              </p>
+              <p className="mt-1 text-[11px] text-wire-500">{archiveHint}</p>
             </div>
             <button
               type="button"
@@ -91,9 +96,8 @@ export function ShiftLedgerPanel({ open, onClose }: Props) {
               <button
                 type="button"
                 onClick={() => {
-                  if (!window.confirm("Clear all archived shifts on this device?")) return;
-                  clearShiftLedger();
-                  setEntries([]);
+                  if (!window.confirm("Clear all archived shifts?")) return;
+                  onClearAll();
                   setExpandedId(null);
                 }}
                 className="rounded border border-wire-800 px-2.5 py-1 text-[9px] uppercase tracking-[0.2em] text-wire-500 transition hover:border-siren/50 hover:text-siren"
@@ -126,8 +130,7 @@ export function ShiftLedgerPanel({ open, onClose }: Props) {
                     setExpandedId((id) => (id === entry.id ? null : entry.id))
                   }
                   onDelete={() => {
-                    deleteShiftRecord(entry.id);
-                    setEntries(loadShiftLedger());
+                    onDelete(entry.id);
                     if (expandedId === entry.id) setExpandedId(null);
                   }}
                 />
@@ -187,6 +190,10 @@ function LedgerRow({
           <div className="mt-1.5 text-[10px] text-wire-600">
             {entry.analystCount} analysts · {entry.model.split("/").pop()} · $
             {entry.initialCash.toLocaleString()}
+            {entry.replay?.timeline?.length ? " · replay saved" : ""}
+            {entry.payload?.shift_artifacts
+              ? ` · ${Object.keys(entry.payload.shift_artifacts).length} artifact sets`
+              : ""}
           </div>
         </div>
         <span className="shrink-0 text-[10px] text-brass/70">{expanded ? "−" : "+"}</span>
