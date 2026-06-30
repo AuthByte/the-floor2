@@ -18,6 +18,7 @@ import { ShiftLedgerPanel } from "./components/ShiftLedgerPanel";
 import { ShadowBenchPanel } from "./components/ShadowBenchPanel";
 import { ShiftReplayPanel } from "./components/ShiftReplayPanel";
 import { WeatherReportPanel } from "./components/WeatherReportPanel";
+import { BacktesterPanel } from "./components/BacktesterPanel";
 
 import { ShiftPhaseRail } from "./components/ShiftPhaseRail";
 import { FloorIdleHint } from "./components/FloorIdleHint";
@@ -196,6 +197,8 @@ export default function App() {
   const [focusSeq, setFocusSeq] = useState(0);
 
   const [ledgerOpen, setLedgerOpen] = useState(false);
+
+  const [backtestOpen, setBacktestOpen] = useState(false);
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [memoOpen, setMemoOpen] = useState(false);
@@ -732,6 +735,8 @@ export default function App() {
 
         ledgerCount={userData.shifts.length}
 
+        onOpenBacktest={() => setBacktestOpen(true)}
+
         onOpenLedger={() => setLedgerOpen(true)}
 
         onOpenShortcuts={() => setShortcutsOpen(true)}
@@ -1031,6 +1036,16 @@ export default function App() {
         open={weatherOpen}
         onClose={() => setWeatherOpen(false)}
         payload={floor.decisions}
+      />
+
+      <BacktesterPanel
+        open={backtestOpen}
+        onClose={() => setBacktestOpen(false)}
+        tickers={tickers}
+        model={model}
+        openrouterKey={openrouterKey}
+        enabledAgentKeys={roster.enabledKeys}
+        initialCapital={initialCash}
       />
 
       <ShortcutsPanel

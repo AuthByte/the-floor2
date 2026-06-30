@@ -7,6 +7,7 @@ interface Props {
   totalRooms: number;
   tickerHint: string;
   ledgerCount?: number;
+  onOpenBacktest?: () => void;
   onOpenLedger?: () => void;
   onOpenShortcuts?: () => void;
   onOpenMemo?: () => void;
@@ -54,6 +55,7 @@ export function SystemBar({
   totalRooms,
   tickerHint,
   ledgerCount = 0,
+  onOpenBacktest,
   onOpenLedger,
   onOpenShortcuts,
   onOpenMemo,
@@ -147,6 +149,16 @@ export function SystemBar({
             className="rounded border border-brass/50 bg-brass/10 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-brass transition hover:bg-brass/20 active:translate-y-px"
           >
             memo
+          </button>
+        ) : null}
+        {onOpenBacktest ? (
+          <button
+            type="button"
+            onClick={onOpenBacktest}
+            title="Backtester"
+            className="rounded border border-phos/40 bg-phos/10 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-phos transition hover:bg-phos/20 active:translate-y-px"
+          >
+            backtest
           </button>
         ) : null}
         {onOpenLedger ? (

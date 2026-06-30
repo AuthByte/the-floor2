@@ -350,6 +350,50 @@ export interface ResolveTickersRequest {
   max_tickers?: number;
 }
 
+export interface BacktestRequest {
+  tickers: string[];
+  graph_nodes: GraphNode[];
+  graph_edges: GraphEdge[];
+  model_name: string;
+  model_provider: string;
+  start_date: string;
+  end_date: string;
+  initial_capital: number;
+  margin_requirement: number;
+  api_keys?: Record<string, string>;
+}
+
+export interface BacktestDayResult {
+  date: string;
+  portfolio_value: number;
+  cash: number;
+  decisions: Record<string, unknown>;
+  executed_trades: Record<string, number>;
+  analyst_signals: Record<string, unknown>;
+  current_prices: Record<string, number>;
+  long_exposure: number;
+  short_exposure: number;
+  gross_exposure: number;
+  net_exposure: number;
+  long_short_ratio?: number | null;
+}
+
+export interface BacktestMetrics {
+  sharpe_ratio?: number | null;
+  sortino_ratio?: number | null;
+  max_drawdown?: number | null;
+  max_drawdown_date?: string | null;
+  long_short_ratio?: number | null;
+  gross_exposure?: number | null;
+  net_exposure?: number | null;
+}
+
+export interface BacktestCompletePayload {
+  performance_metrics: BacktestMetrics;
+  final_portfolio: Record<string, unknown>;
+  total_days: number;
+}
+
 export interface ResolveTickersResponse {
   tickers: string[];
   rationale: string;
