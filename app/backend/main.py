@@ -2,9 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import logging
-import asyncio
-from pathlib import Path
+import os
 
+from app.backend.paths import artifact_dir
 from app.backend.routes import api_router
 from app.backend.database.connection import engine
 from app.backend.database.models import Base
@@ -19,19 +19,25 @@ app = FastAPI(title="THE FLOOR API", description="Backend API for THE FLOOR", ve
 # Initialize database tables (this is safe to run multiple times)
 Base.metadata.create_all(bind=engine)
 
-# Configure CORS
+# Configure CORS — comma-separated origins in CORS_ORIGINS for production.
+_default_origins = "http://localhost:5173,http://127.0.0.1:5173"
+_cors_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", _default_origins).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # Frontend URLs
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Mount static artifact files (agent-generated charts).
-ARTIFACT_DIR = Path(__file__).resolve().parent / "static" / "artifacts"
-ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/artifacts", StaticFiles(directory=ARTIFACT_DIR), name="artifacts")
+_artifact_dir = artifact_dir()
+_artifact_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/artifacts", StaticFiles(directory=_artifact_dir), name="artifacts")
 
 # Include all routes
 app.include_router(api_router)

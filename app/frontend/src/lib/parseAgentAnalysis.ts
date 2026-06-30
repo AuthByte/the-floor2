@@ -1,5 +1,7 @@
 /** Parse streamed agent analysis JSON into UI-friendly structures. */
 
+import { formatEvidenceValue, humanizeAnalysisText } from "./thesisText";
+
 export interface SignalBlock {
   signal?: string;
   details?: string;
@@ -286,7 +288,7 @@ function parseMetrics(_agentKey: string, obj: Record<string, unknown>): MetricsP
     signal,
     confidence,
     rows,
-    summary: summary ?? (rows.length === 0 ? JSON.stringify(inner, null, 2) : undefined),
+    summary: summary ?? (rows.length === 0 ? humanizeAnalysisText(JSON.stringify(inner)) : undefined),
     artifacts: extractArtifacts(inner),
   };
 }
@@ -301,13 +303,9 @@ function parseInvestorJson(obj: Record<string, unknown>): InvestorJsonPayload | 
       continue;
     }
     if (value == null) continue;
-    let text: string;
-    if (typeof value === "string") text = value;
-    else if (typeof value === "number" || typeof value === "boolean") text = String(value);
-    else text = JSON.stringify(value, null, 2);
     evidence.push({
       label: key.replace(/_/g, " "),
-      value: text,
+      value: formatEvidenceValue(value),
     });
   }
 
@@ -382,7 +380,7 @@ export function parseAgentAnalysis(
       return { kind: "prose", text: parsed.reasoning };
     }
 
-    return { kind: "prose", text: JSON.stringify(parsed, null, 2) };
+    return { kind: "prose", text: humanizeAnalysisText(trimmed) };
   } catch {
     return { kind: "prose", text: trimmed };
   }

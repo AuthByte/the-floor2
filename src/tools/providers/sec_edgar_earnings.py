@@ -7,7 +7,7 @@ import re
 import time
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing_extensions import Literal
 
 from src.data.models import EarningsDigest, EarningsFilingRef, EarningsQuarter
@@ -34,6 +34,28 @@ class EarningsDigestLLM(BaseModel):
     key_risks: list[str] = []
     revenue_commentary: str | None = None
     eps_commentary: str | None = None
+
+    @field_validator("management_tone", mode="before")
+    @classmethod
+    def _normalize_tone(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    @field_validator("one_time_items", "key_risks", mode="before")
+    @classmethod
+    def _coerce_string_list(cls, value: object) -> object:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return value
+
+
+def _default_earnings_digest_llm() -> EarningsDigestLLM:
+    return EarningsDigestLLM(
+        summary="Structured SEC filing data is available; narrative digest could not be generated.",
+    )
 
 
 def fetch_earnings_digest(
@@ -113,7 +135,7 @@ def fetch_earnings_digest(
                 EarningsDigestLLM,
                 agent_name=agent_id,
                 state=state,
-                default_factory=lambda: EarningsDigestLLM(summary="Earnings summary unavailable."),
+                default_factory=_default_earnings_digest_llm,
                 stream=True,
             )
             if isinstance(llm_out, EarningsDigestLLM):

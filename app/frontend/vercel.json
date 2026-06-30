@@ -1,0 +1,21 @@
+{
+  "framework": "vite",
+  "installCommand": "npm install",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/hedge-fund/:path*",
+      "destination": "http://the-floor-alb-1808249768.us-east-1.elb.amazonaws.com/hedge-fund/:path*"
+    },
+    {
+      "source": "/artifacts/:path*",
+      "destination": "http://the-floor-alb-1808249768.us-east-1.elb.amazonaws.com/artifacts/:path*"
+    },
+    {
+      "source": "/health",
+      "destination": "http://the-floor-alb-1808249768.us-east-1.elb.amazonaws.com/health"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

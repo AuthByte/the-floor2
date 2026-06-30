@@ -1,6 +1,6 @@
 import { parseAgentAnalysis } from "../../lib/parseAgentAnalysis";
 import { formatHorizonMonths, formatPriceTarget, formatUpsidePct } from "../../lib/outlookFormat";
-import { displayThesisText } from "../../lib/thesisText";
+import { humanizeAnalysisText } from "../../lib/thesisText";
 import { ArtifactGallery } from "./ArtifactGallery";
 import { FundamentalsView } from "./FundamentalsView";
 
@@ -164,9 +164,18 @@ export function AgentAnalysisView({ agentKey, analysis, ticker }: Props) {
     );
   }
 
+  const prose = parsed.text?.trim() || humanizeAnalysisText(analysis);
+  if (!prose) {
+    return (
+      <p className="text-[11px] text-wire-600">
+        Analysis recorded — see charts above or the live wire for details.
+      </p>
+    );
+  }
+
   return (
-    <pre className="whitespace-pre-wrap break-words border border-wire-800 bg-ink-900/80 p-3 text-[11px] leading-relaxed text-wire-100">
-      {parsed.text || displayThesisText(analysis ?? "")}
-    </pre>
+    <div className="border border-wire-800 bg-ink-900/60 px-2 py-2">
+      <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-wire-200">{prose}</p>
+    </div>
   );
 }
