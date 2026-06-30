@@ -7,9 +7,9 @@ import json
 from typing_extensions import Literal
 from src.utils.progress import progress
 from src.utils.thesis_outlook import ThesisOutlookFields, latest_close
-from src.utils.thesis_verdict import finish_from_signal
+from src.utils.thesis_verdict import finish_from_signal, merge_finish_outlook
 from src.utils.llm import call_llm
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 
 
 class MohnishPabraiSignal(ThesisOutlookFields):
@@ -23,7 +23,7 @@ def mohnish_pabrai_agent(state: AgentState, agent_id: str = "mohnish_pabrai_agen
     data = state["data"]
     end_date = data["end_date"]
     tickers = data["tickers"]
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
 
     analysis_data: dict[str, any] = {}
     pabrai_analysis: dict[str, any] = {}
@@ -33,7 +33,7 @@ def mohnish_pabrai_agent(state: AgentState, agent_id: str = "mohnish_pabrai_agen
     for ticker in tickers:
         current_price = None
         progress.update_status(agent_id, ticker, "Fetching financial metrics")
-        metrics = get_financial_metrics(ticker, end_date, period="annual", limit=8, api_key=api_key)
+        metrics = get_financial_metrics(ticker, end_date, period="annual", limit=8, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Gathering financial line items")
         line_items = search_line_items(
@@ -62,11 +62,11 @@ def mohnish_pabrai_agent(state: AgentState, agent_id: str = "mohnish_pabrai_agen
             end_date,
             period="annual",
             limit=8,
-            api_key=api_key,
+            api_key=api_keys,
         )
 
         progress.update_status(agent_id, ticker, "Getting market cap")
-        market_cap = get_market_cap(ticker, end_date, api_key=api_key)
+        market_cap = get_market_cap(ticker, end_date, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Analyzing downside protection")
         downside = analyze_downside_protection(line_items)
@@ -117,6 +117,7 @@ def mohnish_pabrai_agent(state: AgentState, agent_id: str = "mohnish_pabrai_agen
         }
 
         finish_from_signal(agent_id, ticker, pabrai_output, state, current_price=current_price)
+        merge_finish_outlook(pabrai_analysis[ticker], state, agent_id, ticker)
 
     message = HumanMessage(content=json.dumps(pabrai_analysis), name=agent_id)
 

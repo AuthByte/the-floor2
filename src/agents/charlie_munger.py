@@ -7,9 +7,9 @@ import json
 from typing_extensions import Literal
 from src.utils.progress import progress
 from src.utils.thesis_outlook import ThesisOutlookFields, latest_close
-from src.utils.thesis_verdict import finish_from_signal
+from src.utils.thesis_verdict import finish_from_signal, merge_finish_outlook
 from src.utils.llm import call_llm
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 from src.utils.tier1_fetch import tier0_briefings_ready
 
 class CharlieMungerSignal(ThesisOutlookFields):
@@ -26,14 +26,14 @@ def charlie_munger_agent(state: AgentState, agent_id: str = "charlie_munger_agen
     data = state["data"]
     end_date = data["end_date"]
     tickers = data["tickers"]
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     analysis_data = {}
     munger_analysis = {}
     
     for ticker in tickers:
         current_price = None
         progress.update_status(agent_id, ticker, "Fetching financial metrics")
-        metrics = get_financial_metrics(ticker, end_date, period="annual", limit=10, api_key=api_key)  # Munger looks at longer periods
+        metrics = get_financial_metrics(ticker, end_date, period="annual", limit=10, api_key=api_keys)  # Munger looks at longer periods
         
         progress.update_status(agent_id, ticker, "Gathering financial line items")
         financial_line_items = search_line_items(
@@ -57,11 +57,11 @@ def charlie_munger_agent(state: AgentState, agent_id: str = "charlie_munger_agen
             end_date,
             period="annual",
             limit=10,  # Munger examines long-term trends
-            api_key=api_key,
+            api_key=api_keys,
         )
         
         progress.update_status(agent_id, ticker, "Getting market cap")
-        market_cap = get_market_cap(ticker, end_date, api_key=api_key)
+        market_cap = get_market_cap(ticker, end_date, api_key=api_keys)
         
         if tier0_briefings_ready(state):
             progress.update_status(agent_id, ticker, "Using Tier-0 sentiment briefings")
@@ -73,7 +73,7 @@ def charlie_munger_agent(state: AgentState, agent_id: str = "charlie_munger_agen
                 ticker,
                 end_date,
                 limit=100,
-                api_key=api_key,
+                api_key=api_keys,
             )
 
             progress.update_status(agent_id, ticker, "Fetching company news")
@@ -81,7 +81,7 @@ def charlie_munger_agent(state: AgentState, agent_id: str = "charlie_munger_agen
                 ticker,
                 end_date,
                 limit=10,
-                api_key=api_key,
+                api_key=api_keys,
             )
         
         progress.update_status(agent_id, ticker, "Analyzing moat strength")
@@ -143,6 +143,7 @@ def charlie_munger_agent(state: AgentState, agent_id: str = "charlie_munger_agen
         }
         
         finish_from_signal(agent_id, ticker, munger_output, state, current_price=current_price)
+        merge_finish_outlook(munger_analysis[ticker], state, agent_id, ticker)
     
     # Wrap results in a single message for the chain
     message = HumanMessage(

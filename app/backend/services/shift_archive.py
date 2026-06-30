@@ -38,6 +38,7 @@ def archive_shift_to_supabase(
     initial_cash: float,
     analyst_count: int,
     payload: dict[str, Any],
+    replay: dict[str, Any] | None = None,
 ) -> None:
     from app.backend.services.supabase_client import get_supabase
 
@@ -46,7 +47,12 @@ def archive_shift_to_supabase(
         return
 
     decisions = payload.get("decisions")
-    row = {
+    payload_replay = payload.get("replay")
+    resolved_replay = replay
+    if resolved_replay is None and isinstance(payload_replay, dict) and payload_replay.get("timeline"):
+        resolved_replay = payload_replay
+
+    row: dict[str, Any] = {
         "user_id": user_id,
         "run_id": run_id,
         "ts_ms": int(time.time() * 1000),
@@ -58,9 +64,20 @@ def archive_shift_to_supabase(
         "decisions": decisions,
         "prices": payload.get("current_prices"),
         "payload": payload,
-        "replay": None,
     }
+    # Omit replay when absent so merge-upsert does not wipe client-archived timelines.
+    if isinstance(resolved_replay, dict) and resolved_replay.get("timeline"):
+        row["replay"] = resolved_replay
     try:
-        sb.upsert_shift(row)
+        shift_row = sb.upsert_shift(row)
+        shift_id = shift_row.get("id") if shift_row else None
+        from app.backend.services.scoring_service import store_outcomes_from_payload
+
+        store_outcomes_from_payload(
+            shift_id=shift_id,
+            user_id=user_id,
+            run_id=run_id,
+            payload=payload,
+        )
     except Exception as exc:
         logger.warning("Shift archive to Supabase failed: %s", exc)

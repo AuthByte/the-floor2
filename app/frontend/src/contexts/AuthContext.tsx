@@ -20,6 +20,7 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<string | null>;
   signUp: (email: string, password: string) => Promise<string | null>;
   signOut: () => Promise<void>;
+  updatePassword: (newPassword: string) => Promise<string | null>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -93,6 +94,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut();
   }, []);
 
+  const updatePassword = useCallback(async (newPassword: string) => {
+    const supabase = getSupabase();
+    if (!supabase) return "Auth is not configured.";
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    return error?.message ?? null;
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       configured,
@@ -102,8 +110,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signUp,
       signOut,
+      updatePassword,
     }),
-    [configured, loading, session, signIn, signUp, signOut],
+    [configured, loading, session, signIn, signUp, signOut, updatePassword],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

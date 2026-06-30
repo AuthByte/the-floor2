@@ -7,6 +7,7 @@ from src.llm.models import get_model, get_model_info
 from src.utils.progress import progress
 from src.graph.state import AgentState
 from src.utils.tier1_prompt import inject_tier0_into_prompt
+from src.utils.token_usage import extract_usage_from_llm_payload
 
 STREAM_FLUSH_CHARS = 48
 STREAM_FLUSH_SECONDS = 0.18
@@ -63,10 +64,22 @@ def call_llm(
                 structured_llm = llm.with_structured_output(
                     pydantic_model,
                     method="json_mode",
+                    include_raw=True,
                 )
             result = structured_llm.invoke(prompt)
+            if isinstance(result, dict) and "parsed" in result:
+                if agent_name:
+                    usage = extract_usage_from_llm_payload(result.get("raw"))
+                    if usage:
+                        progress.record_token_usage(agent_name, usage)
+                result = result.get("parsed")
+            elif agent_name:
+                usage = extract_usage_from_llm_payload(result)
+                if usage:
+                    progress.record_token_usage(agent_name, usage)
             if model_info and not model_info.has_json_mode():
-                parsed_result = extract_json_from_response(result.content)
+                content = getattr(result, "content", result)
+                parsed_result = extract_json_from_response(content)
                 if parsed_result:
                     return pydantic_model(**parsed_result)
             else:
@@ -74,8 +87,12 @@ def call_llm(
 
         except Exception as e:
             if agent_name:
+                detail = str(e).replace("\n", " ").strip()[:100]
                 progress.update_status(
-                    agent_name, None, f"Error - retry {attempt + 1}/{max_retries}"
+                    agent_name,
+                    None,
+                    f"Error — retry {attempt + 1}/{max_retries}"
+                    + (f": {detail}" if detail else ""),
                 )
 
             if attempt == max_retries - 1:
@@ -97,9 +114,13 @@ def _invoke_streaming(
     buffer = ""
     last_emit_len = 0
     last_emit_at = 0.0
+    usage_delta = None
     progress.update_status(agent_name, None, "Composing thesis…", clear_analysis=True)
 
     for chunk in llm.stream(prompt):
+        chunk_usage = extract_usage_from_llm_payload(chunk)
+        if chunk_usage:
+            usage_delta = chunk_usage
         piece = _chunk_text(chunk)
         if not piece:
             continue
@@ -115,6 +136,10 @@ def _invoke_streaming(
 
     if buffer:
         progress.update_status(agent_name, None, "Composing thesis…", analysis=buffer)
+
+    usage = usage_delta
+    if usage:
+        progress.record_token_usage(agent_name, usage)
 
     parsed = extract_json_from_response(buffer)
     if parsed:

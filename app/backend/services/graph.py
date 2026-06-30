@@ -10,7 +10,11 @@ from src.agents.risk_manager import risk_management_agent
 from src.tools.api import get_macro_context
 from src.main import start
 from src.utils.analysts import ANALYST_CONFIG
+from src.utils.agent_tiers import is_legend_tier, QUANT_KEYS, SPECIALIST_KEYS
+from src.utils.persona_registry import RunAnalystRegistry, default_registry, packs_for_state
 from src.agents.debate_chamber import debate_chamber_node
+from src.agents.analysis_gate import ANALYSIS_GATE_ID, analysis_gate_node
+from src.agents.quant_gate import QUANT_GATE_ID, quant_gate_node
 from src.agents.risk_forge import risk_forge_node
 from src.agents.risk_research_hub import risk_research_hub_node
 from src.agents.risk_watchtower import risk_watchtower_node
@@ -48,19 +52,28 @@ def extract_base_agent_key(unique_id: str) -> str:
 
 
 # Helper function to create the agent graph
-def create_graph(graph_nodes: list, graph_edges: list) -> StateGraph:
+def create_graph(
+    graph_nodes: list,
+    graph_edges: list,
+    analyst_registry: RunAnalystRegistry | None = None,
+) -> StateGraph:
     """Create the workflow based on the React Flow graph structure."""
+    registry = analyst_registry or default_registry()
+    analyst_config = registry.analyst_config()
+
     graph = StateGraph(AgentState)
     graph.add_node("start_node", start)
     graph.add_node("debate_chamber", debate_chamber_node)
     graph.add_node(TIER1_GATE_ID, tier1_gate_node)
+    graph.add_node(ANALYSIS_GATE_ID, analysis_gate_node)
+    graph.add_node(QUANT_GATE_ID, quant_gate_node)
     graph.add_node(RISK_FORGE_ID, risk_forge_node)
     graph.add_node(RISK_RESEARCH_HUB_ID, risk_research_hub_node)
     graph.add_node(SCENARIO_LAB_ID, scenario_lab_node)
     graph.add_node(RISK_WATCHTOWER_ID, risk_watchtower_node)
 
-    # Get analyst nodes from the configuration
-    analyst_nodes = {key: (f"{key}_agent", config["agent_func"]) for key, config in ANALYST_CONFIG.items()}
+    # Get analyst nodes from the run-scoped configuration
+    analyst_nodes = {key: (f"{key}_agent", config["agent_func"]) for key, config in analyst_config.items()}
     
     # Extract agent IDs from graph structure
     agent_ids = [node.id for node in graph_nodes]
@@ -79,7 +92,7 @@ def create_graph(graph_nodes: list, graph_edges: list) -> StateGraph:
             continue
             
         # Skip if the base agent key is not in our analyst configuration
-        if base_agent_key not in ANALYST_CONFIG:
+        if base_agent_key not in analyst_config:
             continue
             
         node_name, node_func = analyst_nodes[base_agent_key]
@@ -116,7 +129,7 @@ def create_graph(graph_nodes: list, graph_edges: list) -> StateGraph:
             nodes_with_outgoing_edges.add(edge.source)
             
             # Check if this is a direct connection from analyst to portfolio manager
-            if (source_base_key in ANALYST_CONFIG and 
+            if (source_base_key in analyst_config and 
                 source_base_key != "portfolio_manager" and 
                 target_base_key == "portfolio_manager"):
                 # Don't add direct edge to portfolio manager - we'll route through risk manager
@@ -125,17 +138,25 @@ def create_graph(graph_nodes: list, graph_edges: list) -> StateGraph:
                 # Add edge between agent nodes (but not direct to portfolio managers)
                 graph.add_edge(edge.source, edge.target)
     
-    # Tier-0 data feeds run first; Tier-1 investors wait on tier1_gate.
+    # Tier-0 data feeds run first; legends wait on tier1_gate; specialists on analysis_gate; quant on quant_gate.
     tier0_ids: list[str] = []
-    tier1_ids: list[str] = []
+    legend_ids: list[str] = []
+    specialist_ids: list[str] = []
+    quant_ids: list[str] = []
     for agent_id in agent_ids:
         base = extract_base_agent_key(agent_id)
-        if base == "portfolio_manager" or base not in ANALYST_CONFIG:
+        if base == "portfolio_manager" or base not in analyst_config:
             continue
         if base in DATA_FEED_KEYS:
             tier0_ids.append(agent_id)
+        elif is_legend_tier(base, analyst_config):
+            legend_ids.append(agent_id)
+        elif base in SPECIALIST_KEYS:
+            specialist_ids.append(agent_id)
+        elif base in QUANT_KEYS:
+            quant_ids.append(agent_id)
         else:
-            tier1_ids.append(agent_id)
+            legend_ids.append(agent_id)
 
     graph.add_edge(RISK_FORGE_ID, RISK_RESEARCH_HUB_ID)
     graph.add_edge(RISK_RESEARCH_HUB_ID, SCENARIO_LAB_ID)
@@ -149,11 +170,26 @@ def create_graph(graph_nodes: list, graph_edges: list) -> StateGraph:
     else:
         graph.add_edge("start_node", RISK_FORGE_ID)
 
-    if tier1_ids:
-        for agent_id in tier1_ids:
+    if legend_ids:
+        for agent_id in legend_ids:
             graph.add_edge(TIER1_GATE_ID, agent_id)
+            graph.add_edge(agent_id, ANALYSIS_GATE_ID)
     else:
-        graph.add_edge(TIER1_GATE_ID, "debate_chamber")
+        graph.add_edge(TIER1_GATE_ID, ANALYSIS_GATE_ID)
+
+    if specialist_ids:
+        for agent_id in specialist_ids:
+            graph.add_edge(ANALYSIS_GATE_ID, agent_id)
+            graph.add_edge(agent_id, QUANT_GATE_ID)
+    else:
+        graph.add_edge(ANALYSIS_GATE_ID, QUANT_GATE_ID)
+
+    if quant_ids:
+        for agent_id in quant_ids:
+            graph.add_edge(QUANT_GATE_ID, agent_id)
+            graph.add_edge(agent_id, "debate_chamber")
+    else:
+        graph.add_edge(QUANT_GATE_ID, "debate_chamber")
 
     # Connect analysts that have direct connections to portfolio managers through the debate chamber
     for analyst_id, portfolio_manager_id in direct_to_portfolio_managers.items():
@@ -177,7 +213,18 @@ def create_graph(graph_nodes: list, graph_edges: list) -> StateGraph:
     return graph
 
 
-async def run_graph_async(graph, portfolio, tickers, start_date, end_date, model_name, model_provider, request=None, run_id=None):
+async def run_graph_async(
+    graph,
+    portfolio,
+    tickers,
+    start_date,
+    end_date,
+    model_name,
+    model_provider,
+    request=None,
+    run_id=None,
+    analyst_registry: RunAnalystRegistry | None = None,
+):
     """Async wrapper for run_graph to work with asyncio."""
     # Use run_in_executor to run the synchronous function in a separate thread
     # so it doesn't block the event loop
@@ -194,6 +241,7 @@ async def run_graph_async(graph, portfolio, tickers, start_date, end_date, model
             model_provider,
             request,
             run_id=run_id,
+            analyst_registry=analyst_registry,
         ),
     )
     return result
@@ -209,6 +257,7 @@ def run_graph(
     model_provider: str,
     request=None,
     run_id: str | None = None,
+    analyst_registry: RunAnalystRegistry | None = None,
 ) -> dict:
     """
     Run the graph with the given portfolio, tickers,
@@ -220,38 +269,53 @@ def run_graph(
 
     get_cache().clear()
 
-    return graph.invoke(
-        {
-            "messages": [
-                HumanMessage(
-                    content="Make trading decisions based on the provided data.",
-                )
-            ],
-            "data": {
-                "tickers": tickers,
-                "portfolio": portfolio,
-                "start_date": start_date,
-                "end_date": end_date,
-                "run_id": run_id,
-                "analyst_signals": {},
-                "ticker_dossiers": {},
-                "risk_pipeline": {},
-                "risk_watchtower_baselines": {},
-                "macro_context": macro_context,
-                "tier0_briefings": {},
-                "tier0_complete": not any(
-                    extract_base_agent_key(n.id) in DATA_FEED_KEYS
-                    for n in (getattr(request, "graph_nodes", None) or [])
-                ),
-            },
-            "metadata": {
-                "show_reasoning": False,
-                "model_name": model_name,
-                "model_provider": model_provider,
-                "request": request,  # Pass the request for agent-specific model access
-            },
+    registry = analyst_registry or default_registry()
+    persona_packs = {
+        key: pack.to_pack_body()
+        for key, pack in packs_for_state(registry).items()
+    }
+
+    initial_state = {
+        "messages": [
+            HumanMessage(
+                content="Make trading decisions based on the provided data.",
+            )
+        ],
+        "data": {
+            "tickers": tickers,
+            "portfolio": portfolio,
+            "start_date": start_date,
+            "end_date": end_date,
+            "run_id": run_id,
+            "analyst_signals": {},
+            "ticker_dossiers": {},
+            "risk_pipeline": {},
+            "risk_watchtower_baselines": {},
+            "macro_context": macro_context,
+            "tier0_briefings": {},
+            "quant_briefings": {},
+            "insider_trades_by_ticker": {},
+            "run_analyst_config": registry.analyst_config(),
+            "persona_packs": persona_packs,
+            "tier0_complete": not any(
+                extract_base_agent_key(n.id) in DATA_FEED_KEYS
+                for n in (getattr(request, "graph_nodes", None) or [])
+            ),
         },
-    )
+        "metadata": {
+            "show_reasoning": False,
+            "model_name": model_name,
+            "model_provider": model_provider,
+            "request": request,  # Pass the request for agent-specific model access
+        },
+    }
+
+    if run_id:
+        from src.utils.live_run_registry import bind_graph_signals
+
+        bind_graph_signals(run_id, initial_state["data"]["analyst_signals"])
+
+    return graph.invoke(initial_state)
 
 
 def parse_hedge_fund_response(response):

@@ -8,8 +8,8 @@ from src.tools.api import get_financial_metrics, get_market_cap, search_line_ite
 from src.utils.llm import call_llm
 from src.utils.progress import progress
 from src.utils.thesis_outlook import ThesisOutlookFields, latest_close
-from src.utils.thesis_verdict import finish_from_signal
-from src.utils.api_key import get_api_key_from_state
+from src.utils.thesis_verdict import finish_from_signal, merge_finish_outlook
+from src.tools.providers.keys import keys_from_state
 
 class RakeshJhunjhunwalaSignal(ThesisOutlookFields):
     signal: Literal["bullish", "bearish", "neutral"]
@@ -21,7 +21,7 @@ def rakesh_jhunjhunwala_agent(state: AgentState, agent_id: str = "rakesh_jhunjhu
     data = state["data"]
     end_date = data["end_date"]
     tickers = data["tickers"]
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     # Collect all analysis for LLM reasoning
     analysis_data = {}
     jhunjhunwala_analysis = {}
@@ -31,7 +31,7 @@ def rakesh_jhunjhunwala_agent(state: AgentState, agent_id: str = "rakesh_jhunjhu
 
         # Core Data
         progress.update_status(agent_id, ticker, "Fetching financial metrics")
-        metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=5, api_key=api_key)
+        metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=5, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Fetching financial line items")
         financial_line_items = search_line_items(
@@ -52,11 +52,11 @@ def rakesh_jhunjhunwala_agent(state: AgentState, agent_id: str = "rakesh_jhunjhu
                 "issuance_or_purchase_of_equity_shares"
             ],
             end_date,
-            api_key=api_key,
+            api_key=api_keys,
         )
 
         progress.update_status(agent_id, ticker, "Getting market cap")
-        market_cap = get_market_cap(ticker, end_date, api_key=api_key)
+        market_cap = get_market_cap(ticker, end_date, api_key=api_keys)
 
         # ─── Analyses ───────────────────────────────────────────────────────────
         progress.update_status(agent_id, ticker, "Analyzing growth")
@@ -149,6 +149,7 @@ def rakesh_jhunjhunwala_agent(state: AgentState, agent_id: str = "rakesh_jhunjhu
         jhunjhunwala_analysis[ticker] = jhunjhunwala_output.model_dump()
 
         finish_from_signal(agent_id, ticker, jhunjhunwala_output, state, current_price=current_price)
+        merge_finish_outlook(jhunjhunwala_analysis[ticker], state, agent_id, ticker)
 
     # ─── Push message back to graph state ──────────────────────────────────────
     message = HumanMessage(content=json.dumps(jhunjhunwala_analysis), name=agent_id)

@@ -15,6 +15,7 @@ const ALPACA_PAPER_STORAGE = "floor.alpaca.paper";
 const RISK_PIPELINE_STORAGE = "floor.risk.pipeline";
 const MEMO_EMAIL_STORAGE = "floor.memo.email";
 const DIGEST_EMAIL_STORAGE = "floor.digest.email";
+const ONBOARDING_STORAGE = "floor.onboarding.done";
 
 export function readLocalSettings(): UserSettings {
   const enabledAgents = readLocalEnabledAgents();
@@ -28,6 +29,7 @@ export function readLocalSettings(): UserSettings {
     runRiskPipeline: localStorage.getItem(RISK_PIPELINE_STORAGE) !== "0",
     memoEmail: localStorage.getItem(MEMO_EMAIL_STORAGE) === "1",
     digestEmail: localStorage.getItem(DIGEST_EMAIL_STORAGE) || undefined,
+    onboarding_completed: localStorage.getItem(ONBOARDING_STORAGE) === "1" || undefined,
   };
 }
 
@@ -68,6 +70,9 @@ export function writeLocalSettings(settings: UserSettings): void {
   }
   if (settings.digestEmail != null) {
     localStorage.setItem(DIGEST_EMAIL_STORAGE, settings.digestEmail);
+  }
+  if (settings.onboarding_completed != null) {
+    localStorage.setItem(ONBOARDING_STORAGE, settings.onboarding_completed ? "1" : "0");
   }
 }
 

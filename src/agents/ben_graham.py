@@ -1,17 +1,17 @@
 from src.graph.state import AgentState, show_agent_reasoning
-from src.tools.api import get_financial_metrics, get_market_cap, search_line_items
+from src.tools.api import get_financial_metrics, get_market_cap, get_prices, search_line_items
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 import json
 from typing_extensions import Literal
 from src.utils.progress import progress
-from src.utils.thesis_outlook import ThesisOutlookFields, latest_close
-from src.utils.thesis_verdict import finish_from_signal
+from src.utils.thesis_outlook import ThesisOutlookFields, OUTLOOK_JSON_SCHEMA, OUTLOOK_PROMPT_RULES, latest_close
+from src.utils.thesis_verdict import finish_from_signal, merge_finish_outlook
 from src.utils.interactive_artifacts import build_graham_gauge
 from src.utils.llm import call_llm
 import math
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 
 
 def _line_val(item, name: str, default: float = 0) -> float:
@@ -36,7 +36,7 @@ def ben_graham_agent(state: AgentState, agent_id: str = "ben_graham_agent"):
     data = state["data"]
     end_date = data["end_date"]
     tickers = data["tickers"]
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     
     analysis_data = {}
     graham_analysis = {}
@@ -44,13 +44,21 @@ def ben_graham_agent(state: AgentState, agent_id: str = "ben_graham_agent"):
     for ticker in tickers:
         current_price = None
         progress.update_status(agent_id, ticker, "Fetching financial metrics")
-        metrics = get_financial_metrics(ticker, end_date, period="annual", limit=10, api_key=api_key)
+        metrics = get_financial_metrics(ticker, end_date, period="annual", limit=10, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Gathering financial line items")
-        financial_line_items = search_line_items(ticker, ["earnings_per_share", "revenue", "net_income", "book_value_per_share", "total_assets", "total_liabilities", "current_assets", "current_liabilities", "dividends_and_other_cash_distributions", "outstanding_shares"], end_date, period="annual", limit=10, api_key=api_key)
+        financial_line_items = search_line_items(ticker, ["earnings_per_share", "revenue", "net_income", "book_value_per_share", "total_assets", "total_liabilities", "current_assets", "current_liabilities", "dividends_and_other_cash_distributions", "outstanding_shares"], end_date, period="annual", limit=10, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Getting market cap")
-        market_cap = get_market_cap(ticker, end_date, api_key=api_key)
+        market_cap = get_market_cap(ticker, end_date, api_key=api_keys)
+
+        prices = get_prices(
+            ticker,
+            start_date=data["start_date"],
+            end_date=end_date,
+            api_key=api_keys,
+        )
+        current_price = latest_close(prices)
 
         # Perform sub-analyses
         progress.update_status(agent_id, ticker, "Analyzing earnings stability")
@@ -82,6 +90,7 @@ def ben_graham_agent(state: AgentState, agent_id: str = "ben_graham_agent"):
             analysis_data=analysis_data,
             state=state,
             agent_id=agent_id,
+            current_price=current_price,
         )
 
         graham_analysis[ticker] = {"signal": graham_output.signal, "confidence": graham_output.confidence, "reasoning": graham_output.reasoning}
@@ -92,7 +101,16 @@ def ben_graham_agent(state: AgentState, agent_id: str = "ben_graham_agent"):
             artifacts.append(gauge)
             graham_analysis[ticker]["artifacts"] = artifacts
 
-        finish_from_signal(agent_id, ticker, graham_output, state, artifacts=artifacts or None, current_price=current_price)
+        finish_from_signal(
+            agent_id,
+            ticker,
+            graham_output,
+            state,
+            artifacts=artifacts or None,
+            current_price=current_price,
+            analysis_data=analysis_data[ticker],
+        )
+        merge_finish_outlook(graham_analysis[ticker], state, agent_id, ticker)
 
     # Wrap results in a single message for the chain
     message = HumanMessage(content=json.dumps(graham_analysis), name=agent_id)
@@ -296,7 +314,7 @@ def analyze_valuation_graham(financial_line_items: list, market_cap: float) -> d
             details.append("Current price is zero or invalid; can't compute margin of safety.")
     # else: already appended details for missing graham_number
 
-    return {"score": score, "details": "; ".join(details)}
+    return {"score": score, "details": "; ".join(details), "graham_number": graham_number}
 
 
 def generate_graham_output(
@@ -304,6 +322,7 @@ def generate_graham_output(
     analysis_data: dict[str, any],
     state: AgentState,
     agent_id: str,
+    current_price: float | None = None,
 ) -> BenGrahamSignal:
     """
     Generates an investment decision in the style of Benjamin Graham:
@@ -334,27 +353,38 @@ def generate_graham_output(
             For example, if bearish: "Despite consistent earnings, the current price of $50 exceeds our calculated Graham Number of $35, offering no margin of safety. Additionally, the current ratio of only 1.2 falls below Graham's preferred 2.0 threshold..."
                         
             Return a rational recommendation: bullish, bearish, or neutral, with a confidence level (0-100) and thorough reasoning.
+            {outlook_rules}
             """,
             ),
             (
                 "human",
                 """Based on the following analysis, create a Graham-style investment signal:
 
-            Analysis Data for {ticker}:
+            Ticker: {ticker}
+            Latest close (USD): {current_price}
+
+            Analysis Data:
             {analysis_data}
 
             Return JSON exactly in this format:
             {{
               "signal": "bullish" or "bearish" or "neutral",
               "confidence": float (0-100),
-              "reasoning": "string"
+              "reasoning": "string",
+{outlook_schema}
             }}
             """,
             ),
         ]
     )
 
-    prompt = template.invoke({"analysis_data": json.dumps(analysis_data, indent=2), "ticker": ticker})
+    prompt = template.invoke({
+        "analysis_data": json.dumps(analysis_data, indent=2),
+        "ticker": ticker,
+        "current_price": current_price if current_price is not None else "unknown",
+        "outlook_rules": OUTLOOK_PROMPT_RULES,
+        "outlook_schema": OUTLOOK_JSON_SCHEMA,
+    })
 
     def create_default_ben_graham_signal():
         return BenGrahamSignal(signal="neutral", confidence=0.0, reasoning="Error in generating analysis; defaulting to neutral.")

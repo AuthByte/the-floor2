@@ -136,7 +136,7 @@ def fetch_earnings_digest(
                 agent_name=agent_id,
                 state=state,
                 default_factory=_default_earnings_digest_llm,
-                stream=True,
+                stream=False,
             )
             if isinstance(llm_out, EarningsDigestLLM):
                 digest.summary = llm_out.summary

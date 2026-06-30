@@ -57,6 +57,10 @@ const BASE_ROOM_ASSETS: Record<string, RoomAsset> = {
     roomImage: "/rooms/news_sentiment_analyst.png",
     accent: "#94a3b8",
   },
+  insider_activity_desk: {
+    roomImage: "/rooms/insider_activity_desk.png",
+    accent: "#16a34a",
+  },
   growth_analyst: {
     roomImage: "/rooms/growth_analyst.png",
     accent: "#4ade80",
@@ -179,6 +183,22 @@ const BASE_ROOM_ASSETS: Record<string, RoomAsset> = {
   unknown_unknowns: {
     roomImage: "/rooms/unknown_unknowns.png",
     accent: "#991b1b",
+  },
+  quant_pead: {
+    roomImage: "/rooms/technical_analyst.png",
+    accent: "#38bdf8",
+  },
+  quant_momentum: {
+    roomImage: "/rooms/technical_analyst.png",
+    accent: "#22d3ee",
+  },
+  quant_mean_reversion: {
+    roomImage: "/rooms/valuation_analyst.png",
+    accent: "#c084fc",
+  },
+  quant_volatility: {
+    roomImage: "/rooms/technical_analyst.png",
+    accent: "#818cf8",
   },
   warren_buffett: {
     roomImage: "/rooms/warren_buffett.png",

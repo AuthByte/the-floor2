@@ -12,8 +12,8 @@ export function FloorIdleHint({ runState, enabledCount, hasApiKey }: Props) {
   const ready = enabledCount > 0 && hasApiKey;
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-24 z-20 flex justify-center px-4">
-      <div className="max-w-md rounded-lg border border-wire-800/80 bg-ink-950/90 px-5 py-4 text-center shadow-float backdrop-blur-md">
+    <div className="pointer-events-none absolute inset-x-0 bottom-24 z-20 flex animate-fade-in justify-center px-4">
+      <div className="max-w-md animate-soft-float rounded-lg border border-wire-800/80 bg-ink-950/90 px-5 py-4 text-center shadow-float backdrop-blur-md">
         <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-brass/80">
           floor standby
         </p>
@@ -35,6 +35,8 @@ export function FloorIdleHint({ runState, enabledCount, hasApiKey }: Props) {
 
 function HintChip({ children }: { children: React.ReactNode }) {
   return (
-    <span className="rounded border border-wire-800/80 bg-ink-900/60 px-2 py-0.5">{children}</span>
+    <span className="rounded border border-wire-800/80 bg-ink-900/60 px-2 py-0.5 transition-transform duration-200 hover:scale-105">
+      {children}
+    </span>
   );
 }

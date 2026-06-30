@@ -22,6 +22,17 @@ class SignalResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class Signal(BaseModel):
+    """Point-in-time alpha model view (conviction in [-1, +1])."""
+
+    model_name: str
+    ticker: str
+    date: str
+    value: float = Field(description="Conviction from -1.0 (bearish) to +1.0 (bullish)")
+    reasoning: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class QuantSignals(BaseModel):
     """All signals for a single ticker on a single date."""
 

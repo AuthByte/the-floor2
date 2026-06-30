@@ -21,8 +21,8 @@ from src.utils.interactive_artifacts import build_burry_contrarian
 from src.utils.llm import call_llm
 from src.utils.progress import progress
 from src.utils.thesis_outlook import ThesisOutlookFields, latest_close
-from src.utils.thesis_verdict import finish_from_signal
-from src.utils.api_key import get_api_key_from_state
+from src.utils.thesis_verdict import finish_from_signal, merge_finish_outlook
+from src.tools.providers.keys import keys_from_state
 from src.utils.tier1_fetch import tier0_briefings_ready
 
 
@@ -36,7 +36,7 @@ class MichaelBurrySignal(ThesisOutlookFields):
 
 def michael_burry_agent(state: AgentState, agent_id: str = "michael_burry_agent"):
     """Analyse stocks using Michael Burry's deep‑value, contrarian framework."""
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     data = state["data"]
     end_date: str = data["end_date"]  # YYYY‑MM‑DD
     start_date: str = data.get("start_date", end_date)
@@ -54,7 +54,7 @@ def michael_burry_agent(state: AgentState, agent_id: str = "michael_burry_agent"
         # Fetch raw data
         # ------------------------------------------------------------------
         progress.update_status(agent_id, ticker, "Fetching financial metrics")
-        metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=5, api_key=api_key)
+        metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=5, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Fetching line items")
         line_items = search_line_items(
@@ -72,7 +72,7 @@ def michael_burry_agent(state: AgentState, agent_id: str = "michael_burry_agent"
                 "issuance_or_purchase_of_equity_shares",
             ],
             end_date,
-            api_key=api_key,
+            api_key=api_keys,
         )
 
         if tier0_briefings_ready(state):
@@ -87,10 +87,10 @@ def michael_burry_agent(state: AgentState, agent_id: str = "michael_burry_agent"
             news = get_company_news(ticker, end_date=end_date, start_date=lookback_start, limit=250)
 
         progress.update_status(agent_id, ticker, "Fetching price history")
-        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_key)
+        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Fetching market cap")
-        market_cap = get_market_cap(ticker, end_date, api_key=api_key)
+        market_cap = get_market_cap(ticker, end_date, api_key=api_keys)
 
         # ------------------------------------------------------------------
         # Run sub‑analyses
@@ -102,7 +102,7 @@ def michael_burry_agent(state: AgentState, agent_id: str = "michael_burry_agent"
         balance_sheet_analysis = _analyze_balance_sheet(metrics, line_items)
 
         progress.update_status(agent_id, ticker, "Analyzing insider activity")
-        insider_analysis = _analyze_insider_activity(insider_trades)
+        insider_analysis = _analyze_insider_activity(insider_trades, end_date)
 
         progress.update_status(agent_id, ticker, "Analyzing contrarian sentiment")
         contrarian_analysis = _analyze_contrarian_sentiment(news)
@@ -179,6 +179,7 @@ def michael_burry_agent(state: AgentState, agent_id: str = "michael_burry_agent"
             artifacts=artifacts or None,
             current_price=current_price,
         )
+        merge_finish_outlook(burry_analysis[ticker], state, agent_id, ticker)
 
     # ----------------------------------------------------------------------
     # Return to the graph
@@ -320,27 +321,10 @@ def _analyze_balance_sheet(metrics, line_items):
 
 # ----- Insider activity -----------------------------------------------------
 
-def _analyze_insider_activity(insider_trades):
-    """Net insider buying over the last 12 months acts as a hard catalyst."""
+def _analyze_insider_activity(insider_trades, end_date: str):
+    from src.agents._insider_utils import score_insider_trades
 
-    max_score = 2
-    score = 0
-    details: list[str] = []
-
-    if not insider_trades:
-        details.append("No insider trade data")
-        return {"score": score, "max_score": max_score, "details": "; ".join(details)}
-
-    shares_bought = sum(t.transaction_shares or 0 for t in insider_trades if (t.transaction_shares or 0) > 0)
-    shares_sold = abs(sum(t.transaction_shares or 0 for t in insider_trades if (t.transaction_shares or 0) < 0))
-    net = shares_bought - shares_sold
-    if net > 0:
-        score += 2 if net / max(shares_sold, 1) > 1 else 1
-        details.append(f"Net insider buying of {net:,} shares")
-    else:
-        details.append("Net insider selling")
-
-    return {"score": score, "max_score": max_score, "details": "; ".join(details)}
+    return score_insider_trades(insider_trades or [], as_of=end_date, mode="burry")
 
 
 # ----- Contrarian sentiment -------------------------------------------------

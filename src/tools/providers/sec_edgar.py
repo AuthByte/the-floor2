@@ -30,6 +30,15 @@ GAAP_MAP = {
     "shareholders_equity": ["StockholdersEquity", "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"],
     "cash_and_equivalents": ["CashAndCashEquivalentsAtCarryingValue"],
     "ebitda": ["EarningsBeforeInterestTaxesDepreciationAndAmortization"],
+    "ebit": ["OperatingIncomeLoss"],
+    "depreciation_and_amortization": [
+        "DepreciationDepletionAndAmortization",
+        "DepreciationAndAmortization",
+    ],
+    "capital_expenditure": [
+        "PaymentsToAcquirePropertyPlantAndEquipment",
+        "CapitalExpenditures",
+    ],
     "gross_profit": ["GrossProfit"],
     "earnings_per_share": ["EarningsPerShareBasic", "EarningsPerShareDiluted"],
     "book_value_per_share": ["BookValuePerShare"],

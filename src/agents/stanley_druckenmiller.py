@@ -14,10 +14,10 @@ import json
 from typing_extensions import Literal
 from src.utils.progress import progress
 from src.utils.thesis_outlook import ThesisOutlookFields, latest_close
-from src.utils.thesis_verdict import finish_from_signal
+from src.utils.thesis_verdict import finish_from_signal, merge_finish_outlook
 from src.utils.llm import call_llm
 import statistics
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 from src.utils.tier1_fetch import tier0_briefings_ready
 
 class StanleyDruckenmillerSignal(ThesisOutlookFields):
@@ -40,13 +40,13 @@ def stanley_druckenmiller_agent(state: AgentState, agent_id: str = "stanley_druc
     start_date = data["start_date"]
     end_date = data["end_date"]
     tickers = data["tickers"]
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     analysis_data = {}
     druck_analysis = {}
 
     for ticker in tickers:
         progress.update_status(agent_id, ticker, "Fetching financial metrics")
-        metrics = get_financial_metrics(ticker, end_date, period="annual", limit=5, api_key=api_key)
+        metrics = get_financial_metrics(ticker, end_date, period="annual", limit=5, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Gathering financial line items")
         # Include relevant line items for Stan Druckenmiller's approach:
@@ -75,11 +75,11 @@ def stanley_druckenmiller_agent(state: AgentState, agent_id: str = "stanley_druc
             end_date,
             period="annual",
             limit=5,
-            api_key=api_key,
+            api_key=api_keys,
         )
 
         progress.update_status(agent_id, ticker, "Getting market cap")
-        market_cap = get_market_cap(ticker, end_date, api_key=api_key)
+        market_cap = get_market_cap(ticker, end_date, api_key=api_keys)
 
         if tier0_briefings_ready(state):
             progress.update_status(agent_id, ticker, "Using Tier-0 sentiment briefings")
@@ -87,13 +87,13 @@ def stanley_druckenmiller_agent(state: AgentState, agent_id: str = "stanley_druc
             company_news = []
         else:
             progress.update_status(agent_id, ticker, "Fetching insider trades")
-            insider_trades = get_insider_trades(ticker, end_date, limit=50, api_key=api_key)
+            insider_trades = get_insider_trades(ticker, end_date, limit=50, api_key=api_keys)
 
             progress.update_status(agent_id, ticker, "Fetching company news")
-            company_news = get_company_news(ticker, end_date, limit=50, api_key=api_key)
+            company_news = get_company_news(ticker, end_date, limit=50, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Fetching recent price data for momentum")
-        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_key)
+        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_keys)
         current_price = latest_close(prices)
 
         progress.update_status(agent_id, ticker, "Analyzing growth & momentum")
@@ -103,7 +103,7 @@ def stanley_druckenmiller_agent(state: AgentState, agent_id: str = "stanley_druc
         sentiment_analysis = analyze_sentiment(company_news)
 
         progress.update_status(agent_id, ticker, "Analyzing insider activity")
-        insider_activity = analyze_insider_activity(insider_trades)
+        insider_activity = analyze_insider_activity(insider_trades, end_date=end_date)
 
         progress.update_status(agent_id, ticker, "Analyzing risk-reward")
         risk_reward_analysis = analyze_risk_reward(financial_line_items, prices)
@@ -158,6 +158,7 @@ def stanley_druckenmiller_agent(state: AgentState, agent_id: str = "stanley_druc
         }
 
         finish_from_signal(agent_id, ticker, druck_output, state, current_price=current_price)
+        merge_finish_outlook(druck_analysis[ticker], state, agent_id, ticker)
 
     # Wrap results in a single message
     message = HumanMessage(content=json.dumps(druck_analysis), name=agent_id)
@@ -279,51 +280,14 @@ def analyze_growth_and_momentum(financial_line_items: list, prices: list) -> dic
     return {"score": final_score, "details": "; ".join(details)}
 
 
-def analyze_insider_activity(insider_trades: list) -> dict:
-    """
-    Simple insider-trade analysis:
-      - If there's heavy insider buying, we nudge the score up.
-      - If there's mostly selling, we reduce it.
-      - Otherwise, neutral.
-    """
-    # Default is neutral (5/10).
-    score = 5
-    details = []
+def analyze_insider_activity(insider_trades: list, *, end_date: str | None = None) -> dict:
+    """Insider-trade analysis via shared utils (Druckenmiller buy-ratio buckets)."""
+    from datetime import date
 
-    if not insider_trades:
-        details.append("No insider trades data; defaulting to neutral")
-        return {"score": score, "details": "; ".join(details)}
+    from src.agents._insider_utils import score_insider_trades
 
-    buys, sells = 0, 0
-    for trade in insider_trades:
-        # Use transaction_shares to determine if it's a buy or sell
-        # Negative shares = sell, positive shares = buy
-        if trade.transaction_shares is not None:
-            if trade.transaction_shares > 0:
-                buys += 1
-            elif trade.transaction_shares < 0:
-                sells += 1
-
-    total = buys + sells
-    if total == 0:
-        details.append("No buy/sell transactions found; neutral")
-        return {"score": score, "details": "; ".join(details)}
-
-    buy_ratio = buys / total
-    if buy_ratio > 0.7:
-        # Heavy buying => +3 points from the neutral 5 => 8
-        score = 8
-        details.append(f"Heavy insider buying: {buys} buys vs. {sells} sells")
-    elif buy_ratio > 0.4:
-        # Moderate buying => +1 => 6
-        score = 6
-        details.append(f"Moderate insider buying: {buys} buys vs. {sells} sells")
-    else:
-        # Low insider buying => -1 => 4
-        score = 4
-        details.append(f"Mostly insider selling: {buys} buys vs. {sells} sells")
-
-    return {"score": score, "details": "; ".join(details)}
+    as_of = end_date or date.today().isoformat()
+    return score_insider_trades(insider_trades or [], as_of=as_of, mode="druck")
 
 
 def analyze_sentiment(news_items: list) -> dict:

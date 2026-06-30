@@ -7,17 +7,12 @@ import { WalkGridOverlay } from "./WalkGridOverlay";
 import { WalkingSprite } from "./WalkingSprite";
 import { RoomThesisHint } from "./RoomThesisHint";
 import { RoomVerdictPlaque } from "./RoomVerdictPlaque";
+import { AgentScorecardPlaque } from "./AgentScorecardPlaque";
 
-// Room source images are square (1024×1024) and now pre-processed once with
-// fal-ai Bria background removal (see scripts/remove-room-bg.mjs). They have
-// a real alpha channel on disk, so no per-load chroma-key is needed.
-//
-// We render the hex inscribed in a ROOM_H×ROOM_H box (square) so its aspect
-// ratio is preserved, then horizontally center it within the wider ROOM_W
-// slot. The image is drawn at its NATURAL resolution and scaled DOWN with a
-// CSS transform — when the outer canvas is zoomed in, the transform-derived
-// effective size grows back toward natural resolution, keeping pixels crisp
-// at every zoom level.
+// Room images are 1024×1024 illustrations. We draw at natural resolution and
+// scale into the room slot so zooming the floor canvas re-samples from the
+// full bitmap. Use smooth (auto) interpolation — pixelated/crisp-edges looks
+// chunky when the floor is zoomed out.
 const IMG_NATURAL = 1024;
 const IMG_DISP    = ROOM_H;                       // display size (square)
 const IMG_SCALE   = IMG_DISP / IMG_NATURAL;
@@ -41,11 +36,14 @@ function PixelRoomImpl({ agent, state, asset, enabled = true, hideSprite = false
   return (
     <div className="room-pixel-art relative h-full w-full overflow-visible">
       {state.verdict ? <RoomVerdictPlaque verdict={state.verdict} /> : null}
+      <AgentScorecardPlaque agentKey={agent.key} />
       <RoomThesisHint state={state} />
       <img
         src={asset.roomImage}
         alt={agent.name}
         draggable={false}
+        decoding="async"
+        loading="lazy"
         style={{
           position:        "absolute",
           top:             0,
@@ -55,7 +53,7 @@ function PixelRoomImpl({ agent, state, asset, enabled = true, hideSprite = false
           maxWidth:        "none",     // override Tailwind's preflight max-width:100%
           transformOrigin: "top left",
           transform:       `scale(${IMG_SCALE})`,
-          imageRendering:  "pixelated",
+          imageRendering:  "auto",
           pointerEvents:   "none",
           userSelect:      "none",
         }}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { investorAvatarUrl, investorInitials } from "../lib/investorAvatar";
 
 interface Props {
@@ -10,7 +10,7 @@ interface Props {
 }
 
 /** Portrait slot — uses `/public/avatars/{key}.png` when you add headshots. */
-export function InvestorAvatar({
+export const InvestorAvatar = memo(function InvestorAvatar({
   agentKey,
   name,
   accent = "#22ff66",
@@ -53,6 +53,8 @@ export function InvestorAvatar({
         boxShadow: speaking ? `0 0 10px ${accent}44` : undefined,
       }}
       onError={() => setUseFallback(true)}
+      loading="lazy"
+      decoding="async"
     />
   );
-}
+});

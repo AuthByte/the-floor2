@@ -5,6 +5,7 @@ import {
   RISK_MANAGER_ID,
   RISK_PIPELINE_AGENTS,
   SPECIALIST_ANALYSTS,
+  QUANT_ANALYSTS,
   roomIdFor,
 } from "./agents";
 import { DEBATE_ROOM_ID } from "./layout";
@@ -16,6 +17,8 @@ export type ShiftPhaseId =
   | "data_feeds"
   | "risk_pipeline"
   | "legends"
+  | "analysis"
+  | "quant"
   | "debate"
   | "boss"
   | "complete";
@@ -30,6 +33,8 @@ export const SHIFT_PHASE_STEPS: ShiftPhaseStep[] = [
   { id: "data_feeds", label: "Data feeds", short: "T0" },
   { id: "risk_pipeline", label: "Risk pipeline", short: "Risk" },
   { id: "legends", label: "Legend floor", short: "T1" },
+  { id: "analysis", label: "Further analysis", short: "Analysis" },
+  { id: "quant", label: "Quant desk", short: "Quant" },
   { id: "debate", label: "Argument room", short: "Debate" },
   { id: "boss", label: "Boss memo", short: "Boss" },
 ];
@@ -71,17 +76,17 @@ export function deriveShiftPhase(opts: {
   if (runState === "complete") return "complete";
 
   const dataIds = roomIds(DATA_ANALYSTS.filter((a) => enabledAgentKeys.has(a.key)).map((a) => a.key));
-  const legendIds = roomIds(
-    [...NAMED_ANALYSTS, ...SPECIALIST_ANALYSTS]
-      .filter((a) => enabledAgentKeys.has(a.key))
-      .map((a) => a.key),
-  );
+  const legendIds = roomIds(NAMED_ANALYSTS.filter((a) => enabledAgentKeys.has(a.key)).map((a) => a.key));
+  const analysisIds = roomIds(SPECIALIST_ANALYSTS.filter((a) => enabledAgentKeys.has(a.key)).map((a) => a.key));
+  const quantIds = roomIds(QUANT_ANALYSTS.filter((a) => enabledAgentKeys.has(a.key)).map((a) => a.key));
   const riskIds = runRiskPipeline ? RISK_PIPELINE_AGENTS.map((a) => a.key) : [];
 
   const bossIds = [RISK_MANAGER_ID, PORTFOLIO_MANAGER_ID];
 
   if (anyStatus(rooms, bossIds, "WORKING")) return "boss";
   if (rooms[DEBATE_ROOM_ID]?.status === "WORKING") return "debate";
+  if (anyStatus(rooms, quantIds, "WORKING")) return "quant";
+  if (anyStatus(rooms, analysisIds, "WORKING")) return "analysis";
   if (anyStatus(rooms, legendIds, "WORKING")) return "legends";
   if (anyStatus(rooms, riskIds, "WORKING")) return "risk_pipeline";
   if (anyStatus(rooms, dataIds, "WORKING")) return "data_feeds";
@@ -90,6 +95,8 @@ export function deriveShiftPhase(opts: {
   if (rooms[DEBATE_ROOM_ID]?.status !== "DONE" && rooms[DEBATE_ROOM_ID]?.status !== "STANDBY") {
     return "debate";
   }
+  if (!allTerminal(rooms, quantIds)) return "quant";
+  if (!allTerminal(rooms, analysisIds)) return "analysis";
   if (!allTerminal(rooms, legendIds)) return "legends";
   if (runRiskPipeline && !allTerminal(rooms, riskIds)) return "risk_pipeline";
   if (!allTerminal(rooms, dataIds)) return "data_feeds";

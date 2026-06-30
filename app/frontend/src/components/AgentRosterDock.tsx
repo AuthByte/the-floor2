@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { DATA_ANALYSTS, NAMED_ANALYSTS, SPECIALIST_ANALYSTS } from "../lib/agents";
+import { DATA_ANALYSTS, NAMED_ANALYSTS, SPECIALIST_ANALYSTS, QUANT_ANALYSTS, type AgentDef } from "../lib/agents";
 import type { RunState } from "../lib/types";
 
 interface Props {
@@ -12,7 +12,10 @@ interface Props {
   onSetDataTier: (on: boolean) => void;
   onSetNamedTier: (on: boolean) => void;
   onSetSpecialistTier: (on: boolean) => void;
+  onSetQuantTier: (on: boolean) => void;
   runState: RunState;
+  personaAgents?: AgentDef[];
+  personaLoading?: boolean;
 }
 
 export function AgentRosterDock(p: Props) {
@@ -32,14 +35,16 @@ export function AgentRosterDock(p: Props) {
   const dataOn = DATA_ANALYSTS.every((a) => p.enabled.has(a.key));
   const namedOn = NAMED_ANALYSTS.every((a) => p.enabled.has(a.key));
   const specialistOn = SPECIALIST_ANALYSTS.every((a) => p.enabled.has(a.key));
+  const quantOn = QUANT_ANALYSTS.every((a) => p.enabled.has(a.key));
   const dataSome = DATA_ANALYSTS.some((a) => p.enabled.has(a.key)) && !dataOn;
   const namedSome = NAMED_ANALYSTS.some((a) => p.enabled.has(a.key)) && !namedOn;
   const specialistSome = SPECIALIST_ANALYSTS.some((a) => p.enabled.has(a.key)) && !specialistOn;
+  const quantSome = QUANT_ANALYSTS.some((a) => p.enabled.has(a.key)) && !quantOn;
 
   const ratio = p.totalToggleable ? p.enabledCount / p.totalToggleable : 0;
 
   return (
-    <div ref={rootRef} className="relative z-30 shrink-0">
+    <div ref={rootRef} data-tour="agent-roster" className="desk-roster-dock relative z-30 shrink-0">
       {open && (
         <RosterPanel
           dataOn={dataOn}
@@ -48,6 +53,8 @@ export function AgentRosterDock(p: Props) {
           dataSome={dataSome}
           namedSome={namedSome}
           specialistSome={specialistSome}
+          quantOn={quantOn}
+          quantSome={quantSome}
           enabled={p.enabled}
           onToggle={p.onToggle}
           onEnableAll={p.onEnableAll}
@@ -55,6 +62,9 @@ export function AgentRosterDock(p: Props) {
           onSetDataTier={p.onSetDataTier}
           onSetNamedTier={p.onSetNamedTier}
           onSetSpecialistTier={p.onSetSpecialistTier}
+          onSetQuantTier={p.onSetQuantTier}
+          personaAgents={p.personaAgents}
+          personaLoading={p.personaLoading}
         />
       )}
 
@@ -116,6 +126,8 @@ function RosterPanel({
   dataSome,
   namedSome,
   specialistSome,
+  quantOn,
+  quantSome,
   enabled,
   onToggle,
   onEnableAll,
@@ -123,6 +135,9 @@ function RosterPanel({
   onSetDataTier,
   onSetNamedTier,
   onSetSpecialistTier,
+  onSetQuantTier,
+  personaAgents = [],
+  personaLoading = false,
 }: {
   dataOn: boolean;
   namedOn: boolean;
@@ -130,6 +145,8 @@ function RosterPanel({
   dataSome: boolean;
   namedSome: boolean;
   specialistSome: boolean;
+  quantOn: boolean;
+  quantSome: boolean;
   enabled: Set<string>;
   onToggle: (key: string) => void;
   onEnableAll: () => void;
@@ -137,6 +154,9 @@ function RosterPanel({
   onSetDataTier: (on: boolean) => void;
   onSetNamedTier: (on: boolean) => void;
   onSetSpecialistTier: (on: boolean) => void;
+  onSetQuantTier: (on: boolean) => void;
+  personaAgents?: AgentDef[];
+  personaLoading?: boolean;
 }) {
   return (
     <div className="absolute bottom-full left-0 right-0 max-h-[min(56vh,460px)] animate-rise-in overflow-hidden border border-b-0 border-wire-800 bg-ink-950/98 shadow-float backdrop-blur-xl">
@@ -151,7 +171,7 @@ function RosterPanel({
         </div>
       </div>
 
-      <div className="grid max-h-[min(46vh,380px)] grid-cols-1 gap-0 overflow-y-auto lg:grid-cols-3">
+      <div className="grid max-h-[min(46vh,380px)] grid-cols-1 gap-0 overflow-y-auto sm:grid-cols-2 xl:grid-cols-4">
         <TierSection
           title="tier 0 — data feeds"
           accent="emerald"
@@ -182,6 +202,38 @@ function RosterPanel({
           onTierToggle={() => onSetSpecialistTier(!specialistOn)}
           onToggle={onToggle}
         />
+        <TierSection
+          title="quant desk — v2"
+          accent="violet"
+          agents={QUANT_ANALYSTS}
+          enabled={enabled}
+          tierOn={quantOn}
+          tierSome={quantSome}
+          onTierToggle={() => onSetQuantTier(!quantOn)}
+          onToggle={onToggle}
+        />
+        {personaAgents.length > 0 || personaLoading ? (
+          <TierSection
+            title="personas — minted"
+            accent="brass"
+            agents={personaAgents}
+            enabled={enabled}
+            tierOn={personaAgents.length > 0 && personaAgents.every((a) => enabled.has(a.key))}
+            tierSome={
+              personaAgents.some((a) => enabled.has(a.key)) &&
+              !personaAgents.every((a) => enabled.has(a.key))
+            }
+            onTierToggle={() => {
+              const allOn = personaAgents.every((a) => enabled.has(a.key));
+              for (const a of personaAgents) {
+                if (allOn && enabled.has(a.key)) onToggle(a.key);
+                else if (!allOn && !enabled.has(a.key)) onToggle(a.key);
+              }
+            }}
+            onToggle={onToggle}
+            emptyLabel={personaLoading ? "Loading personas…" : undefined}
+          />
+        ) : null}
       </div>
 
       <div className="border-t border-wire-900 bg-ink-900/40 px-4 py-2 text-[9px] uppercase tracking-[0.2em] text-wire-600">
@@ -200,18 +252,34 @@ function TierSection({
   tierSome,
   onTierToggle,
   onToggle,
+  emptyLabel,
 }: {
   title: string;
-  accent: "brass" | "emerald" | "sky";
+  accent: "brass" | "emerald" | "sky" | "violet";
   agents: { key: string; name: string; callsign: string }[];
   enabled: Set<string>;
   tierOn: boolean;
   tierSome: boolean;
   onTierToggle: () => void;
   onToggle: (key: string) => void;
+  emptyLabel?: string;
 }) {
-  const dotOn = accent === "brass" ? "bg-brass" : accent === "sky" ? "bg-sky-400" : "bg-phos";
-  const accentHex = accent === "brass" ? "#e3b24b" : accent === "sky" ? "#5eb3f5" : "#2fd08a";
+  const dotOn =
+    accent === "brass"
+      ? "bg-brass"
+      : accent === "sky"
+        ? "bg-sky-400"
+        : accent === "violet"
+          ? "bg-violet-400"
+          : "bg-phos";
+  const accentHex =
+    accent === "brass"
+      ? "#e3b24b"
+      : accent === "sky"
+        ? "#5eb3f5"
+        : accent === "violet"
+          ? "#a78bfa"
+          : "#2fd08a";
   return (
     <section className="border-b border-wire-900 md:border-b-0 md:border-r md:last:border-r-0">
       <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-wire-900 bg-ink-950/95 px-4 py-2 backdrop-blur">
@@ -234,10 +302,17 @@ function TierSection({
         </label>
       </div>
       <ul className="divide-y divide-wire-900/70">
-        {agents.map((a) => {
+        {agents.length === 0 && emptyLabel ? (
+          <li className="px-4 py-3 text-[10px] uppercase tracking-[0.2em] text-wire-600">{emptyLabel}</li>
+        ) : null}
+        {agents.map((a, i) => {
           const on = enabled.has(a.key);
           return (
-            <li key={a.key}>
+            <li
+              key={a.key}
+              className="animate-rise-in"
+              style={{ animationDelay: `${Math.min(i * 28, 280)}ms` }}
+            >
               <label
                 className={`flex cursor-pointer items-center gap-3 px-4 py-2 transition hover:bg-wire-900/40 ${
                   on ? "text-wire-100" : "text-wire-600"

@@ -10,9 +10,10 @@ import json
 from src.graph.state import AgentState, show_agent_reasoning
 from src.tools.api import get_company_news, get_prices
 from src.utils.interactive_artifacts import build_sentiment_price_overlay
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 from src.utils.llm import call_llm
 from src.utils.progress import progress
+from src.utils.tier0_emit import attach_data_sources, begin_ticker_fetch
 from typing_extensions import Literal
 
 
@@ -42,17 +43,25 @@ def news_sentiment_agent(state: AgentState, agent_id: str = "news_sentiment_agen
     end_date = data.get("end_date")
     start_date = data.get("start_date", end_date)
     tickers = data.get("tickers")
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     sentiment_analysis = {}
 
     for ticker in tickers:
+        begin_ticker_fetch()
         progress.update_status(agent_id, ticker, "Fetching company news")
         company_news = get_company_news(
             ticker=ticker,
             end_date=end_date,
-            limit=100,
-            api_key=api_key,
+            limit=250,
+            api_key=api_keys,
         )
+        for article in company_news or []:
+            if article.sentiment is None:
+                from src.tools.news_enrichment import infer_sentiment_from_title
+
+                inferred = infer_sentiment_from_title(article.title)
+                if inferred:
+                    article.sentiment = inferred
 
         company_news = company_news or []
         news_signals = []
@@ -137,7 +146,7 @@ def news_sentiment_agent(state: AgentState, agent_id: str = "news_sentiment_agen
             }
         }
 
-        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_key)
+        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_keys)
         artifacts: list[dict] = []
         overlay = build_sentiment_price_overlay(ticker, news=company_news, prices=prices)
         if overlay:
@@ -149,7 +158,7 @@ def news_sentiment_agent(state: AgentState, agent_id: str = "news_sentiment_agen
             "reasoning": reasoning,
             "artifacts": artifacts,
         }
-        sentiment_analysis[ticker] = payload
+        sentiment_analysis[ticker] = attach_data_sources(payload)
 
         progress.update_status(agent_id, ticker, "Done", analysis=json.dumps(payload, indent=4))
 

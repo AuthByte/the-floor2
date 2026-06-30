@@ -106,3 +106,87 @@ def enrich_outlook(
     if current_price is not None and current_price > 0:
         enriched["reference_price"] = round(float(current_price), 2)
     return enriched
+
+
+def _dig(analysis: dict[str, Any], *keys: str) -> Any:
+    cur: Any = analysis
+    for key in keys:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    return cur
+
+
+def _positive_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        val = float(value)
+        if val > 0:
+            return round(val, 2)
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def derive_price_target(
+    analysis: dict[str, Any] | None,
+    *,
+    current_price: float | None = None,
+) -> float | None:
+    """Derive a per-share USD price target from deterministic valuation blocks."""
+    if not analysis:
+        return None
+
+    for path in (
+        ("intrinsic_per_share",),
+        ("intrinsic_value_per_share",),
+        ("fair_value_per_share",),
+        ("graham_number",),
+        ("valuation_analysis", "graham_number"),
+        ("intrinsic_val_analysis", "intrinsic_per_share"),
+        ("intrinsic_value_analysis", "intrinsic_per_share"),
+    ):
+        val = _dig(analysis, *path)
+        per_share = _positive_float(val)
+        if per_share is not None:
+            return per_share
+
+    shares = _positive_float(_dig(analysis, "outstanding_shares"))
+    if shares is None:
+        for path in (
+            ("intrinsic_value_analysis", "outstanding_shares"),
+            ("intrinsic_val_analysis", "outstanding_shares"),
+        ):
+            shares = _positive_float(_dig(analysis, *path))
+            if shares is not None:
+                break
+
+    for path in (
+        ("intrinsic_value_analysis", "intrinsic_value"),
+        ("intrinsic_val_analysis", "intrinsic_value"),
+        ("intrinsic_value",),
+    ):
+        total_iv = _positive_float(_dig(analysis, *path))
+        if total_iv is not None and shares is not None:
+            per_share = _positive_float(total_iv / shares)
+            if per_share is not None:
+                return per_share
+
+    market_cap = _positive_float(_dig(analysis, "market_cap"))
+    total_iv = _positive_float(
+        _dig(analysis, "intrinsic_value_analysis", "intrinsic_value")
+        or _dig(analysis, "intrinsic_val_analysis", "intrinsic_value")
+        or _dig(analysis, "intrinsic_value")
+    )
+    if (
+        total_iv is not None
+        and market_cap is not None
+        and current_price is not None
+        and current_price > 0
+    ):
+        per_share = _positive_float(total_iv / market_cap * current_price)
+        if per_share is not None:
+            return per_share
+
+    return None

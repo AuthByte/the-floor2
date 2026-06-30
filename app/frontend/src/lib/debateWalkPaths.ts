@@ -2,18 +2,9 @@
  * Canvas-space walk paths between investor cubicles and the argument room.
  */
 
-import {
-  DEBATE_H,
-  DEBATE_W,
-  DEBATE_X,
-  DEBATE_Y,
-  ROOM_H,
-  ROOM_POS,
-  ROOM_W,
-} from "./layout";
+import { getActiveFloorPlan } from "./floorPlan/registry";
+import { ROOM_H, ROOM_W } from "./floorPlan/constants";
 import { NAMED_ANALYSTS, roomIdFor } from "./agents";
-
-const T1A_COUNT = Math.ceil(NAMED_ANALYSTS.length / 2);
 
 export type TravelPhase = "home" | "to_debate" | "at_debate" | "to_home";
 
@@ -48,32 +39,45 @@ export function agentTravelPhase(
   return "home";
 }
 
+function plan() {
+  return getActiveFloorPlan();
+}
+
 function isUpperRow(agentKey: string): boolean {
   const idx = NAMED_ANALYSTS.findIndex((a) => a.key === agentKey);
-  return idx >= 0 && idx < T1A_COUNT;
+  return idx >= 0 && idx < plan().t1aCount;
 }
 
 /** Spread agents across the debate floor so they don't stack. */
 export function debateFloorSpot(agentKey: string): { x: number; y: number } {
+  const { x: debateX, y: debateY, w: debateW, h: debateH } = plan().debate;
   const idx = NAMED_ANALYSTS.findIndex((a) => a.key === agentKey);
   const cols = 6;
   const col = idx % cols;
   const row = Math.floor(idx / cols);
-  const padX = DEBATE_W * 0.18;
-  const padY = DEBATE_H * 0.52;
-  const spanX = DEBATE_W - padX * 2;
-  const spanY = DEBATE_H * 0.32;
+  const padX = debateW * 0.18;
+  const padY = debateH * 0.52;
+  const spanX = debateW - padX * 2;
+  const spanY = debateH * 0.32;
   return {
-    x: DEBATE_X + padX + ((col + 0.5) / cols) * spanX,
-    y: DEBATE_Y + padY + ((row % 2) + 0.5) * (spanY / 2),
+    x: debateX + padX + ((col + 0.5) / cols) * spanX,
+    y: debateY + padY + ((row % 2) + 0.5) * (spanY / 2),
   };
 }
 
 function homeSpot(agentKey: string): { x: number; y: number } {
   const id = roomIdFor(agentKey);
-  const pos = ROOM_POS[id];
-  if (!pos) return { x: DEBATE_X + DEBATE_W / 2, y: DEBATE_Y + DEBATE_H / 2 };
+  const pos = plan().roomPos[id];
+  const { x: debateX, y: debateY, w: debateW, h: debateH } = plan().debate;
+  if (!pos) return { x: debateX + debateW / 2, y: debateY + debateH / 2 };
   const upper = isUpperRow(agentKey);
+  const horizontal = plan().debateRouting === "horizontal";
+  if (horizontal) {
+    return {
+      x: pos.x + ROOM_W * 0.62,
+      y: pos.y + ROOM_H / 2,
+    };
+  }
   return {
     x: pos.x + ROOM_W / 2,
     y: pos.y + (upper ? ROOM_H * 0.78 : ROOM_H * 0.62),
@@ -82,8 +86,14 @@ function homeSpot(agentKey: string): { x: number; y: number } {
 
 function cubicleDoor(agentKey: string): { x: number; y: number } {
   const id = roomIdFor(agentKey);
-  const pos = ROOM_POS[id];
+  const pos = plan().roomPos[id];
   const upper = isUpperRow(agentKey);
+  if (plan().debateRouting === "horizontal") {
+    return {
+      x: pos.x + ROOM_W,
+      y: pos.y + ROOM_H / 2,
+    };
+  }
   return {
     x: pos.x + ROOM_W / 2,
     y: pos.y + (upper ? ROOM_H : 0),
@@ -92,9 +102,16 @@ function cubicleDoor(agentKey: string): { x: number; y: number } {
 
 function debateDoor(agentKey: string): { x: number; y: number } {
   const upper = isUpperRow(agentKey);
+  const { x: debateX, y: debateY, w: debateW, h: debateH } = plan().debate;
+  if (plan().debateRouting === "horizontal") {
+    return {
+      x: debateX,
+      y: upper ? debateY + debateH * 0.35 : debateY + debateH * 0.65,
+    };
+  }
   return {
-    x: DEBATE_X + DEBATE_W / 2,
-    y: upper ? DEBATE_Y : DEBATE_Y + DEBATE_H,
+    x: debateX + debateW / 2,
+    y: upper ? debateY : debateY + debateH,
   };
 }
 
@@ -108,19 +125,35 @@ export function buildDebatePath(
   const corridor = debateDoor(agentKey);
   const slot = debateFloorSpot(agentKey);
 
+  const { y: debateY, h: debateH } = plan().debate;
   const upper = isUpperRow(agentKey);
-  const midY = upper
-    ? DEBATE_Y - 24
-    : DEBATE_Y + DEBATE_H + 24;
 
-  const forward = [home, door, { x: door.x, y: midY }, corridor, slot];
+  let forward: { x: number; y: number }[];
+  if (plan().debateRouting === "horizontal") {
+    const elbowOut = { x: door.x + 28, y: door.y };
+    const elbowIn = { x: corridor.x - 28, y: corridor.y };
+    forward = [home, door, elbowOut, elbowIn, corridor, slot];
+  } else {
+    const midY = upper ? debateY - 24 : debateY + debateH + 24;
+    forward = [home, door, { x: door.x, y: midY }, corridor, slot];
+  }
   return reverse ? [...forward].reverse() : forward;
 }
 
 export function homePatrolWaypoints(agentKey: string): { x: number; y: number }[] {
   const id = roomIdFor(agentKey);
-  const pos = ROOM_POS[id];
+  const pos = plan().roomPos[id];
   if (!pos) return [homeSpot(agentKey)];
+  const horizontal = plan().debateRouting === "horizontal";
+  if (horizontal) {
+    const cy = pos.y + ROOM_H / 2;
+    return [
+      { x: pos.x + ROOM_W * 0.55, y: cy },
+      { x: pos.x + ROOM_W * 0.72, y: cy - 12 },
+      { x: pos.x + ROOM_W * 0.72, y: cy + 12 },
+      { x: pos.x + ROOM_W * 0.45, y: cy },
+    ];
+  }
   const cx = pos.x + ROOM_W / 2;
   const cy = pos.y + ROOM_H * 0.72;
   return [

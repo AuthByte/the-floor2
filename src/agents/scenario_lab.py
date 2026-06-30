@@ -8,7 +8,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from src.graph.state import AgentState
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 from src.utils.progress import progress
 from src.utils.risk_pipeline import (
     MAX_SCENARIOS,
@@ -44,7 +44,7 @@ def scenario_lab_node(state: AgentState) -> dict[str, Any]:
     data = state["data"]
     tickers = data.get("tickers") or []
     end_date = data.get("end_date", "")
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     pipeline: dict[str, Any] = data.get("risk_pipeline") or {}
 
     for ticker in tickers:
@@ -52,8 +52,8 @@ def scenario_lab_node(state: AgentState) -> dict[str, Any]:
         bucket = ensure_risk_bucket(state, key)
         progress.update_status(SCENARIO_LAB_ID, key, "Building scenarios")
 
-        metrics = get_financial_metrics(key, end_date, period="ttm", limit=4, api_key=api_key)
-        market_cap = get_market_cap(key, end_date, api_key=api_key)
+        metrics = get_financial_metrics(key, end_date, period="ttm", limit=4, api_key=api_keys)
+        market_cap = get_market_cap(key, end_date, api_key=api_keys)
         rev_growth = None
         if metrics:
             rev_growth = getattr(metrics[0], "revenue_growth", None)

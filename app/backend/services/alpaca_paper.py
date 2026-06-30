@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -56,6 +57,67 @@ def is_alpaca_configured(api_keys: Optional[Dict[str, str]] = None) -> bool:
     return resolve_alpaca_credentials(api_keys) is not None
 
 
+def is_alpaca_paper_disabled() -> bool:
+    return os.getenv("ALPACA_PAPER_DISABLED", "").strip().lower() in ("1", "true", "yes")
+
+
+def alpaca_credential_source(api_keys: Optional[Dict[str, str]] = None) -> str:
+    """Return env, request, or none — no secrets."""
+    if is_alpaca_paper_disabled():
+        return "none"
+    keys = api_keys or {}
+    has_request = bool(
+        (keys.get("ALPACA_API_KEY_ID") or keys.get("APCA_API_KEY_ID"))
+        and (keys.get("ALPACA_API_SECRET_KEY") or keys.get("APCA_API_SECRET_KEY"))
+    )
+    if has_request:
+        return "request"
+    if resolve_alpaca_credentials(None):
+        return "env"
+    return "none"
+
+
+def build_paper_summary(
+    orders: List[Dict[str, Any]],
+    account: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    submitted = sum(
+        1
+        for o in orders
+        if o.get("status") not in ("skipped",)
+        and int(o.get("requested_qty") or 0) > 0
+    )
+    filled = sum(
+        1 for o in orders if str(o.get("status", "")).lower() == "filled"
+    )
+    failed = sum(1 for o in orders if o.get("status") == "failed")
+    equity = account.get("equity") if account else None
+    last_equity = account.get("last_equity") if account else None
+    day_pnl: Optional[float] = None
+    if equity is not None and last_equity is not None:
+        day_pnl = equity - last_equity
+    return {
+        "orders_submitted": submitted,
+        "orders_filled": filled,
+        "orders_failed": failed,
+        "day_pnl": day_pnl,
+        "equity": equity,
+    }
+
+
+def _ref_price_for_ticker(
+    ticker: str,
+    current_prices: Optional[Dict[str, Any]],
+) -> Optional[float]:
+    if not current_prices:
+        return None
+    sym = ticker.upper()
+    for key in (sym, ticker, ticker.lower()):
+        if key in current_prices:
+            return _float(current_prices[key])
+    return None
+
+
 class AlpacaPaperClient:
     def __init__(self, key_id: str, secret: str, base_url: str = DEFAULT_PAPER_BASE):
         self.base_url = base_url.rstrip("/")
@@ -90,6 +152,26 @@ class AlpacaPaperClient:
             r.raise_for_status()
             return r.json()
 
+    async def get_orders(self, limit: int = 20) -> List[Dict[str, Any]]:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.get(
+                f"{self.base_url}/v2/orders",
+                headers=self._headers,
+                params={"status": "all", "limit": limit, "direction": "desc"},
+            )
+            r.raise_for_status()
+            return r.json()
+
+    async def get_account_snapshot(self, order_limit: int = 20) -> Dict[str, Any]:
+        account = await self.get_account()
+        positions = await self.get_positions()
+        orders = await self.get_orders(limit=order_limit)
+        return {
+            "account": compact_account(account),
+            "positions": [compact_position(p) for p in positions],
+            "orders": [compact_order(o) for o in orders],
+        }
+
     async def submit_market_order(
         self,
         symbol: str,
@@ -115,6 +197,7 @@ class AlpacaPaperClient:
     async def execute_decisions(
         self,
         decisions: Dict[str, Any],
+        current_prices: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Map PM decisions to market orders on Alpaca paper.
@@ -128,6 +211,8 @@ class AlpacaPaperClient:
             action = str(raw.get("action", "hold")).lower()
             qty = int(raw.get("quantity") or 0)
 
+            ref_price = _ref_price_for_ticker(ticker, current_prices)
+
             if action == "hold" or qty <= 0:
                 orders_out.append(
                     {
@@ -136,6 +221,8 @@ class AlpacaPaperClient:
                         "requested_qty": qty,
                         "status": "skipped",
                         "order_id": None,
+                        "ref_price": ref_price,
+                        "filled_avg_price": None,
                         "error": None,
                     }
                 )
@@ -150,6 +237,8 @@ class AlpacaPaperClient:
                         "requested_qty": qty,
                         "status": "skipped",
                         "order_id": None,
+                        "ref_price": ref_price,
+                        "filled_avg_price": None,
                         "error": f"unknown action: {action}",
                     }
                 )
@@ -166,6 +255,8 @@ class AlpacaPaperClient:
                         "status": str(order.get("status", "submitted")),
                         "order_id": order.get("id"),
                         "filled_qty": order.get("filled_qty"),
+                        "filled_avg_price": _float(order.get("filled_avg_price")),
+                        "ref_price": ref_price,
                         "error": None,
                     }
                 )
@@ -180,6 +271,8 @@ class AlpacaPaperClient:
                         "side": side,
                         "status": "failed",
                         "order_id": None,
+                        "ref_price": ref_price,
+                        "filled_avg_price": None,
                         "error": detail,
                     }
                 )
@@ -190,6 +283,8 @@ class AlpacaPaperClient:
                         "ticker": ticker.upper(),
                         "action": action,
                         "requested_qty": qty,
+                        "ref_price": ref_price,
+                        "filled_avg_price": None,
                         "status": "failed",
                         "order_id": None,
                         "error": str(exc),
@@ -204,11 +299,13 @@ class AlpacaPaperClient:
         except Exception as exc:
             logger.warning("Failed to refresh Alpaca account after orders: %s", exc)
 
+        compacted_account = compact_account(account) if account else None
         return {
             "enabled": True,
             "orders": orders_out,
-            "account": compact_account(account) if account else None,
+            "account": compacted_account,
             "positions": [compact_position(p) for p in positions],
+            "summary": build_paper_summary(orders_out, compacted_account),
         }
 
 
@@ -237,6 +334,21 @@ def compact_position(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def compact_order(raw: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": raw.get("id"),
+        "symbol": raw.get("symbol"),
+        "side": raw.get("side"),
+        "qty": raw.get("qty"),
+        "filled_qty": raw.get("filled_qty"),
+        "filled_avg_price": _float(raw.get("filled_avg_price")),
+        "status": raw.get("status"),
+        "type": raw.get("type"),
+        "submitted_at": raw.get("submitted_at"),
+        "filled_at": raw.get("filled_at"),
+    }
+
+
 def _float(v: Any) -> Optional[float]:
     if v is None:
         return None
@@ -249,15 +361,47 @@ def _float(v: Any) -> Optional[float]:
 async def run_alpaca_paper_execution(
     decisions: Dict[str, Any],
     api_keys: Optional[Dict[str, str]] = None,
+    *,
+    current_prices: Optional[Dict[str, Any]] = None,
+    shift_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute paper orders when configured; otherwise return a skipped payload."""
+    if is_alpaca_paper_disabled():
+        return {
+            "enabled": False,
+            "skipped_reason": "Alpaca paper execution disabled by operator",
+            "shift_id": shift_id,
+            "orders": [],
+            "account": None,
+            "positions": [],
+        }
     client = AlpacaPaperClient.from_api_keys(api_keys)
     if not client:
         return {
             "enabled": False,
             "skipped_reason": "Alpaca API keys not configured",
+            "shift_id": shift_id,
             "orders": [],
             "account": None,
             "positions": [],
         }
-    return await client.execute_decisions(decisions)
+    result = await client.execute_decisions(decisions, current_prices=current_prices)
+    result["shift_id"] = shift_id
+    result["executed_at"] = datetime.now(timezone.utc).isoformat()
+    if "summary" not in result:
+        result["summary"] = build_paper_summary(
+            result.get("orders", []),
+            result.get("account"),
+        )
+    n_ok = sum(
+        1
+        for o in result.get("orders", [])
+        if o.get("status") not in ("failed", "skipped") and o.get("order_id")
+    )
+    logger.info(
+        "Alpaca paper shift=%s orders_submitted=%s filled=%s",
+        shift_id,
+        result.get("summary", {}).get("orders_submitted", n_ok),
+        result.get("summary", {}).get("orders_filled", 0),
+    )
+    return result

@@ -61,7 +61,14 @@ def inject_tier0_into_prompt(prompt: Any, state: dict[str, Any], agent_name: str
     block = tier0_briefing_for_ticker(state, ticker)
     dossier_block = dossier_prompt_block(state, ticker)
     risk_block = risk_briefing_for_ticker(state, ticker)
-    if not block and not dossier_block and not risk_block:
+    macro = (state.get("data") or {}).get("macro_context")
+    macro_block = ""
+    if macro and macro.get("available"):
+        from src.utils.tier0_summaries import macro_briefing_appendix
+
+        macro_block = macro_briefing_appendix(macro)
+
+    if not block and not dossier_block and not risk_block and not macro_block:
         return prompt
 
     appendix_parts: list[str] = []
@@ -82,6 +89,12 @@ def inject_tier0_into_prompt(prompt: Any, state: dict[str, Any], agent_name: str
             "TICKER DOSSIER (structured facts, peer claims, and disputes — "
             "cite fact ids when grounding your view):\n"
             f"{dossier_block}"
+        )
+
+    if macro_block:
+        appendix_parts.append(
+            "MACRO CONTEXT (FRED + BLS — fold into top-down reasoning):\n"
+            f"{macro_block}"
         )
 
     appendix = "\n\n---\n" + "\n\n".join(appendix_parts) + "\n"

@@ -1,4 +1,4 @@
-import { CONSULTATION_ID, DEBATE_ROOM_ID, RISK_RESEARCH_HUB_ID, SCENARIO_LAB_ID, RISK_FORGE_ID, RISK_WATCHTOWER_ID } from "./layout";
+import { CONSULTATION_ID, CHAIR_PROPAGATION_ID, DEBATE_ROOM_ID, RISK_RESEARCH_HUB_ID, SCENARIO_LAB_ID, RISK_FORGE_ID, RISK_WATCHTOWER_ID } from "./layout";
 import { parseOutlookFromAnalysis } from "./outlookFormat";
 import { displayThesisText, extractSignal } from "./thesisText";
 import type {
@@ -7,6 +7,7 @@ import type {
   RoomState,
   RoomVerdict,
 } from "./types";
+import type { TokenUsageStats } from "./tokenUsage";
 
 export interface ProgressPayload {
   agent: string;
@@ -17,6 +18,28 @@ export interface ProgressPayload {
   signal?: string | null;
   confidence?: number | null;
   thesis_summary?: string | null;
+  token_usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+    cost?: number | null;
+    calls?: number;
+  } | null;
+}
+
+function normalizeTokenUsage(
+  raw: ProgressPayload["token_usage"],
+): TokenUsageStats | null | undefined {
+  if (raw == null) return undefined;
+  const total = Number(raw.total_tokens ?? 0);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  return {
+    prompt_tokens: Number(raw.prompt_tokens ?? 0),
+    completion_tokens: Number(raw.completion_tokens ?? 0),
+    total_tokens: total,
+    cost: raw.cost ?? null,
+    calls: raw.calls ?? undefined,
+  };
 }
 
 function normalizeSignal(s: string | null | undefined): RoomVerdict["signal"] {
@@ -38,7 +61,8 @@ function mergeVerdict(
     payload.confidence != null ||
     payload.thesis_summary != null ||
     outlook.time_horizon_months != null ||
-    outlook.price_target != null;
+    outlook.price_target != null ||
+    outlook.reference_price != null;
   if (!hasMeta) return cur.verdict;
   const prev = cur.verdict;
   return {
@@ -52,6 +76,7 @@ function mergeVerdict(
       outlook.time_horizon_months ?? prev?.timeHorizonMonths,
     priceTarget: outlook.price_target ?? prev?.priceTarget,
     upsidePct: outlook.upside_pct ?? prev?.upsidePct,
+    referencePrice: outlook.reference_price ?? prev?.referencePrice,
   };
 }
 
@@ -93,6 +118,28 @@ export function applyRoomProgress(
       if (parsed.messages) consultations = parsed.messages;
     } catch {
       /* keep prior */
+    }
+  }
+
+  let chairPropagationMessage: string | undefined;
+  if (agent === CHAIR_PROPAGATION_ID) {
+    chairPropagationMessage = status;
+    if (analysis) {
+      try {
+        const parsed = JSON.parse(analysis) as {
+          stage?: string;
+          tickers?: string[];
+          material_count?: number;
+        };
+        if (parsed.stage === "complete") {
+          const n = parsed.material_count ?? 0;
+          chairPropagationMessage = `Chair impact reconciled (${n} material)`;
+        } else if (parsed.tickers?.length) {
+          chairPropagationMessage = `Re-weighting committee for ${parsed.tickers.join(", ")}`;
+        }
+      } catch {
+        /* keep status */
+      }
     }
   }
 
@@ -233,10 +280,69 @@ export function applyRoomProgress(
     ];
   }
 
+  const nextStatus =
+    agent === CHAIR_PROPAGATION_ID
+      ? "WORKING"
+      : isDone
+        ? "DONE"
+        : lower === "error" || lower.startsWith("error")
+          ? "ERROR"
+          : lower.includes("queued") ||
+              lower.includes("offline") ||
+              lower.includes("awaiting") ||
+              lower.includes("chamber idle")
+            ? "STANDBY"
+            : "WORKING";
+
+  const nextMessage =
+    chairPropagationMessage != null ? chairPropagationMessage : status;
+
+  const nextHistory = skipHistory
+    ? cur.history
+    : [...cur.history.slice(-12), { ts, ticker, status }];
+
+  const nextTokenUsage = normalizeTokenUsage(payload.token_usage);
+  const tokenUsage =
+    nextTokenUsage === undefined ? cur.tokenUsage : nextTokenUsage;
+
+  if (
+    (tickerOutOfShift ? cur.ticker : ticker ?? cur.ticker) === cur.ticker &&
+    nextMessage === cur.message &&
+    nextAnalysis === cur.analysis &&
+    ts === cur.updatedAt &&
+    nextStatus === cur.status &&
+    tokenUsage === cur.tokenUsage &&
+    (verdict === undefined ? cur.verdict : verdict) === cur.verdict &&
+    (agent === DEBATE_ROOM_ID ? debateFeed : cur.debateFeed) === cur.debateFeed &&
+    (agent === DEBATE_ROOM_ID ? debateRounds : cur.debateRounds) ===
+      cur.debateRounds &&
+    (agent === DEBATE_ROOM_ID ? activeDebateTicker : cur.activeDebateTicker) ===
+      cur.activeDebateTicker &&
+    (agent === CONSULTATION_ID ? consultations : cur.consultations) ===
+      cur.consultations &&
+    (agent === RISK_RESEARCH_HUB_ID ? riskSubagents : cur.riskSubagents) ===
+      cur.riskSubagents &&
+    (agent === RISK_RESEARCH_HUB_ID ? riskReports : cur.riskReports) ===
+      cur.riskReports &&
+    (agent === RISK_FORGE_ID ? riskInventory : cur.riskInventory) ===
+      cur.riskInventory &&
+    (agent === SCENARIO_LAB_ID ? riskScenarios : cur.riskScenarios) ===
+      cur.riskScenarios &&
+    (agent === RISK_WATCHTOWER_ID ? riskMonitoring : cur.riskMonitoring) ===
+      cur.riskMonitoring &&
+    (subagents.length ? subagents : cur.subagents) === cur.subagents &&
+    (subagentResults.length ? subagentResults : cur.subagentResults) ===
+      cur.subagentResults &&
+    thesisHistory === cur.thesisHistory &&
+    nextHistory === cur.history
+  ) {
+    return cur;
+  }
+
   return {
     ...cur,
     ticker: tickerOutOfShift ? cur.ticker : ticker ?? cur.ticker,
-    message: status,
+    message: nextMessage,
     analysis: nextAnalysis,
     updatedAt: ts,
     debateFeed: agent === DEBATE_ROOM_ID ? debateFeed : cur.debateFeed,
@@ -256,20 +362,9 @@ export function applyRoomProgress(
     subagentResults: subagentResults.length ? subagentResults : cur.subagentResults,
     thesisHistory,
     verdict: verdict === undefined ? cur.verdict : verdict,
-    status:
-      isDone
-        ? "DONE"
-        : lower === "error" || lower.startsWith("error")
-          ? "ERROR"
-          : lower.includes("queued") ||
-              lower.includes("offline") ||
-              lower.includes("awaiting") ||
-              lower.includes("chamber idle")
-            ? "STANDBY"
-            : "WORKING",
-    history: skipHistory
-      ? cur.history
-      : [...cur.history.slice(-12), { ts, ticker, status }],
+    status: nextStatus,
+    history: nextHistory,
+    tokenUsage,
   };
 }
 

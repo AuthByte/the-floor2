@@ -1,5 +1,5 @@
 import { roomIdFor } from "./agents";
-import { DEBATE_ROOM_ID, ROOM_H, ROOM_POS, ROOM_W } from "./layout";
+import { DEBATE_ROOM_ID, getRoomPos, ROOM_H, ROOM_W } from "./layout";
 import { parseEmbeddedArtifacts } from "./parseAgentAnalysis";
 import type { RoomState } from "./types";
 
@@ -27,7 +27,7 @@ interface GraphEdge {
 }
 
 function roomCenter(roomId: string) {
-  const pos = ROOM_POS[roomId];
+  const pos = getRoomPos(roomId);
   if (!pos) return null;
   return { x: pos.x + ROOM_W / 2, y: pos.y + ROOM_H / 2 };
 }

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import os
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
@@ -6,7 +7,10 @@ from rich.style import Style
 from rich.text import Text
 from typing import Dict, Optional, Callable, List, Any
 
+from src.utils.token_usage import tracker
+
 console = Console()
+_TUI_ENABLED = os.getenv("PROGRESS_TUI", "").strip().lower() in ("1", "true", "yes")
 
 
 class AgentProgress:
@@ -32,16 +36,22 @@ class AgentProgress:
     def reset_run(self):
         """Clear all agent status (call at the start of each hedge-fund shift)."""
         self.agent_status.clear()
-        self._refresh_display()
+        tracker.reset()
+        if _TUI_ENABLED:
+            self._refresh_display()
 
     def start(self):
         """Start the progress display."""
+        if not _TUI_ENABLED:
+            return
         if not self.started:
             self.live.start()
             self.started = True
 
     def stop(self):
         """Stop the progress display."""
+        if not _TUI_ENABLED:
+            return
         if self.started:
             self.live.stop()
             self.started = False
@@ -94,9 +104,38 @@ class AgentProgress:
                 info.get("signal"),
                 info.get("confidence"),
                 info.get("thesis_summary"),
+                info.get("token_usage"),
             )
 
-        self._refresh_display()
+        if _TUI_ENABLED:
+            self._refresh_display()
+
+    def record_token_usage(self, agent_name: str, usage_delta: dict[str, Any] | None):
+        """Merge LLM usage for an agent and notify progress handlers."""
+        totals = tracker.record(agent_name, usage_delta)
+        if not totals:
+            return
+
+        if agent_name not in self.agent_status:
+            self.agent_status[agent_name] = {"status": "", "ticker": None}
+
+        info = self.agent_status[agent_name]
+        info["token_usage"] = totals
+        timestamp = info.get("timestamp") or datetime.now(timezone.utc).isoformat()
+        info["timestamp"] = timestamp
+
+        for handler in self.update_handlers:
+            handler(
+                agent_name,
+                info.get("ticker"),
+                info.get("status", ""),
+                info.get("analysis"),
+                timestamp,
+                info.get("signal"),
+                info.get("confidence"),
+                info.get("thesis_summary"),
+                totals,
+            )
 
     def get_all_status(self):
         """Get the current status of all agents as a dictionary."""

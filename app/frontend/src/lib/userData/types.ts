@@ -1,14 +1,30 @@
-import type { CompletePayload } from "../types";
+import type { CompletePayload, DebateRound } from "../types";
 import type { ReplayEvent } from "../shiftReplay";
 import type { LogLine } from "../types";
 import type { ShiftSummaryLine } from "../shiftLedger";
 import type { WatchlistPreset } from "../watchlists";
+
+export interface DebateReplayBundle {
+  rounds: DebateRound[];
+  activeTicker?: string | null;
+}
 
 export interface ShiftReplayArchive {
   shiftStartedAt: number;
   timeline: ReplayEvent[];
   roomIds: string[];
   log?: LogLine[];
+  debate?: DebateReplayBundle;
+}
+
+export interface WatchlistDigestPrefs {
+  enabled?: boolean;
+  cadence?: "daily" | "weekly";
+  dayOfWeek?: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+  hourUtc?: number;
+  email?: boolean;
+  emailAddress?: string;
+  includeScorecardHits?: boolean;
 }
 
 export interface UserSettings {
@@ -21,7 +37,9 @@ export interface UserSettings {
   runRiskPipeline?: boolean;
   memoEmail?: boolean;
   digestEmail?: string;
+  watchlistDigest?: WatchlistDigestPrefs;
   migratedFromLocal?: boolean;
+  onboarding_completed?: boolean;
 }
 
 export interface SaveShiftInput {

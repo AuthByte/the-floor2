@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDragPosition } from "../hooks/useDragPosition";
 import { roomIdFor } from "../lib/agents";
-import { ROOM_H, ROOM_POS, ROOM_W } from "../lib/layout";
+import { getRoomPos, ROOM_H, ROOM_W } from "../lib/layout";
 import type { ConsultationMessage } from "../lib/types";
 
 interface Props {
@@ -31,7 +31,7 @@ const prefersReducedMotion =
   window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 function roomCenter(roomId: string, fallbackKey: string) {
-  const pos = ROOM_POS[roomId] ?? ROOM_POS[roomIdFor(fallbackKey)];
+  const pos = getRoomPos(roomId) ?? getRoomPos(roomIdFor(fallbackKey));
   if (!pos) return null;
   return { x: pos.x + ROOM_W / 2, y: pos.y + ROOM_H / 2 };
 }

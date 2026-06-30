@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { useAuth } from "../contexts/AuthContext";
 import { ArtifactGallery } from "./analysis/ArtifactGallery";
+import { fetchFeed } from "../lib/floorSocial/api";
+import { addShadowComment } from "../lib/floorSocial/apiExtended";
+import type { FloorPost } from "../lib/floorSocial/types";
+import { getSupabase } from "../lib/supabase";
 import type { CompletePayload } from "../lib/types";
 import {
   applyShadowPreset,
@@ -12,11 +17,23 @@ import {
   shadowPayloadTickers,
   type WeightMode,
 } from "../lib/shadowBench";
+import {
+  buildForkSnapshot,
+  diffForkOpinions,
+  saveForkLocal,
+  type ForkDiffRow,
+} from "../lib/shiftFork";
+import {
+  PublishForkModal,
+  type ShadowBenchShiftContext,
+} from "./social/PublishForkModal";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   payload: CompletePayload | null;
+  shiftContext?: ShadowBenchShiftContext;
+  onForkPublished?: (post: FloorPost) => void;
 }
 
 const ACTION_CHIP: Record<string, string> = {
@@ -36,15 +53,19 @@ const SIGNAL_DOT: Record<string, string> = {
 const TIER_LABEL = {
   legend: "Legend",
   specialist: "Specialist",
+  quant: "Quant",
   data: "Data feed",
 } as const;
 
-export function ShadowBenchPanel({ open, onClose, payload }: Props) {
+export function ShadowBenchPanel({ open, onClose, payload, shiftContext, onForkPublished }: Props) {
   const tickers = useMemo(() => shadowPayloadTickers(payload), [payload]);
   const [ticker, setTicker] = useState(tickers[0] ?? "");
   const [weightMode, setWeightMode] = useState<WeightMode>("confidence");
   const [enabled, setEnabled] = useState<Record<string, boolean>>({});
   const [preset, setPreset] = useState("all");
+  const [shareOpen, setShareOpen] = useState(false);
+  const [publishForkOpen, setPublishForkOpen] = useState(false);
+  const { session } = useAuth();
 
   useEffect(() => {
     if (!open || !payload || !ticker) return;
@@ -86,16 +107,44 @@ export function ShadowBenchPanel({ open, onClose, payload }: Props) {
     return buildShadowArtifacts(ticker, verdict, refPrice);
   }, [ticker, verdict, refPrice]);
 
+  const forkDiff = useMemo((): ForkDiffRow[] => {
+    if (!ticker || !payload || !verdict) return [];
+    const baselineEnabled = defaultEnabledMap(ticker, signals);
+    const baselineVerdict = computeShadowVerdict(
+      ticker,
+      signals,
+      baselineEnabled,
+      weightMode,
+      bossDecision,
+    );
+    if (!baselineVerdict) return [];
+    return diffForkOpinions(baselineVerdict.opinions, verdict.opinions);
+  }, [ticker, payload, signals, weightMode, bossDecision, verdict]);
+
+  const handleSaveFork = () => {
+    if (!ticker || !payload || !verdict) return;
+    const enabledKeys = agents.filter((a) => enabled[a.key]).map((a) => a.key);
+    const fork = buildForkSnapshot({
+      ticker,
+      label: `${preset} fork · ${ticker}`,
+      enabledAgents: enabledKeys,
+      weightMode,
+      preset,
+      payload,
+    });
+    saveForkLocal(fork);
+  };
+
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[45] flex items-stretch justify-center bg-ink-950/70 p-0 backdrop-blur-[3px] sm:p-4"
+      className="fixed inset-0 z-[45] flex animate-fade-in items-stretch justify-center bg-ink-950/70 p-0 backdrop-blur-[3px] sm:p-4"
       role="presentation"
       onMouseDown={onClose}
     >
       <div
-        className="relative flex h-full w-full max-w-5xl animate-rise-in flex-col overflow-hidden border border-brass/20 bg-ink-950 shadow-float sm:my-auto sm:max-h-[92vh] sm:rounded-lg"
+        className="relative flex h-full w-full max-w-5xl animate-scale-in flex-col overflow-hidden border border-brass/20 bg-ink-950 shadow-float sm:my-auto sm:max-h-[92vh] sm:rounded-lg"
         role="dialog"
         aria-labelledby="shadow-bench-title"
         onMouseDown={(e) => e.stopPropagation()}
@@ -259,6 +308,86 @@ export function ShadowBenchPanel({ open, onClose, payload }: Props) {
                     </p>
                   ) : null}
 
+                  <button
+                    type="button"
+                    onClick={() => setPublishForkOpen(true)}
+                    className="w-full rounded border border-phos/40 bg-phos/5 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-phos transition hover:bg-phos/15"
+                  >
+                    Publish fork to feed
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShareOpen(true)}
+                    className="w-full rounded border border-brass/40 bg-brass/5 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-brass transition hover:bg-brass/15"
+                  >
+                    Share shadow verdict (comment)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveFork}
+                    className="w-full rounded border border-wire-700 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-wire-400 transition hover:border-phos/40 hover:text-phos"
+                  >
+                    Save fork snapshot
+                  </button>
+
+                  {forkDiff.filter((r) => r.changed).length > 0 ? (
+                    <div className="rounded border border-wire-800 bg-ink-900/40 p-3">
+                      <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-wire-500">
+                        fork diff vs full committee
+                      </p>
+                      <table className="mt-2 w-full border-collapse font-mono text-[9px]">
+                        <thead>
+                          <tr className="text-left text-wire-600">
+                            <th className="pb-1 font-normal">agent</th>
+                            <th className="pb-1 font-normal">was</th>
+                            <th className="pb-1 font-normal">now</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {forkDiff
+                            .filter((r) => r.changed)
+                            .slice(0, 8)
+                            .map((r) => (
+                              <tr key={r.agentKey} className="border-t border-wire-900/80 text-wire-400">
+                                <td className="py-1 pr-2 text-wire-300">{r.agentName}</td>
+                                <td className="py-1 pr-2">{r.beforeSignal}</td>
+                                <td className="py-1 text-phos">{r.afterSignal}</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+
+                  <ShareShadowModal
+                    open={shareOpen}
+                    onClose={() => setShareOpen(false)}
+                    ticker={ticker}
+                    verdict={verdict}
+                    enabled={enabled}
+                    weightMode={weightMode}
+                    agents={agents}
+                    sessionUserId={session?.user?.id}
+                  />
+
+                  <PublishForkModal
+                    open={publishForkOpen}
+                    onClose={() => setPublishForkOpen(false)}
+                    ticker={ticker}
+                    preset={preset}
+                    weightMode={weightMode}
+                    enabledAgents={agents.filter((a) => enabled[a.key]).map((a) => a.key)}
+                    payload={payload}
+                    verdict={verdict}
+                    shiftContext={shiftContext}
+                    onPublished={(post) => {
+                      onForkPublished?.(post);
+                      handleSaveFork();
+                    }}
+                  />
+
                   <div className="rounded border border-wire-800 bg-ink-900/40 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-mono text-[9px] uppercase tracking-[0.24em] text-wire-500">
@@ -373,6 +502,153 @@ function Chip({
     <span className={`rounded border px-2 py-0.5 ${color}`}>
       {label} {value}
     </span>
+  );
+}
+
+function ShareShadowModal({
+  open,
+  onClose,
+  ticker,
+  verdict,
+  enabled,
+  weightMode,
+  agents,
+  sessionUserId,
+}: {
+  open: boolean;
+  onClose: () => void;
+  ticker: string;
+  verdict: NonNullable<ReturnType<typeof computeShadowVerdict>>;
+  enabled: Record<string, boolean>;
+  weightMode: WeightMode;
+  agents: ReturnType<typeof listShadowAgents>;
+  sessionUserId?: string;
+}) {
+  const [posts, setPosts] = useState<FloorPost[]>([]);
+  const [filterTicker, setFilterTicker] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setError(null);
+      setDone(false);
+      return;
+    }
+    const supabase = getSupabase();
+    if (!supabase || !sessionUserId) return;
+    setLoading(true);
+    void fetchFeed(supabase, sessionUserId, { limit: 40 })
+      .then(setPosts)
+      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load feed"))
+      .finally(() => setLoading(false));
+  }, [open, sessionUserId]);
+
+  const filtered = useMemo(() => {
+    if (!filterTicker) return posts;
+    const upper = ticker.toUpperCase();
+    return posts.filter((p) => p.tickers.some((t) => t.toUpperCase() === upper));
+  }, [posts, filterTicker, ticker]);
+
+  const enabledAgents = agents.filter((a) => enabled[a.key]).map((a) => a.name);
+  const body = `Shadow ${ticker}: ${verdict.action} (${verdict.confidence}%) — ${verdict.signal}`;
+
+  async function publishTo(postId: string) {
+    const supabase = getSupabase();
+    if (!supabase || !sessionUserId) {
+      setError("Sign in to share.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await addShadowComment(supabase, sessionUserId, postId, body, {
+        ticker,
+        verdict: verdict.action,
+        agents: enabledAgents,
+        weightMode,
+      });
+      setDone(true);
+      setTimeout(onClose, 600);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to publish");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="absolute inset-0 z-10 flex items-center justify-center bg-ink-950/80 p-4"
+      onMouseDown={onClose}
+    >
+      <div
+        className="flex max-h-[70vh] w-full max-w-md flex-col overflow-hidden rounded border border-brass/30 bg-ink-950 shadow-float"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <header className="shrink-0 border-b border-wire-800 px-4 py-3">
+          <h3 className="font-display text-sm font-bold text-wire-100">Share shadow verdict</h3>
+          <p className="mt-0.5 text-[10px] text-wire-500">Attach as comment to a feed post</p>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {!sessionUserId ? (
+            <p className="text-[11px] text-wire-500">Sign in to share.</p>
+          ) : loading ? (
+            <p className="text-[11px] text-wire-500">Loading posts…</p>
+          ) : (
+            <>
+              <label className="mb-3 flex cursor-pointer items-center gap-2 text-[10px] text-wire-400">
+                <input
+                  type="checkbox"
+                  checked={filterTicker}
+                  onChange={(e) => setFilterTicker(e.target.checked)}
+                  className="accent-[rgb(var(--brass))]"
+                />
+                Only posts mentioning {ticker}
+              </label>
+              {filtered.length === 0 ? (
+                <p className="text-[11px] text-wire-500">No matching posts.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {filtered.map((post) => (
+                    <li key={post.id}>
+                      <button
+                        type="button"
+                        disabled={busy || done}
+                        onClick={() => void publishTo(post.id)}
+                        className="w-full rounded border border-wire-800 px-3 py-2 text-left transition hover:border-brass/40 disabled:opacity-40"
+                      >
+                        <div className="font-mono text-[10px] text-brass">
+                          {post.tickers.join(", ")}
+                        </div>
+                        <div className="mt-0.5 truncate text-[11px] text-wire-300">
+                          {post.caption || post.author.displayName}
+                        </div>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+          {done ? <p className="mt-2 text-[11px] text-phos">Published!</p> : null}
+          {error ? <p className="mt-2 text-[11px] text-siren">{error}</p> : null}
+        </div>
+        <footer className="shrink-0 border-t border-wire-800 px-4 py-2 text-right">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-wire-700 px-2 py-1 font-mono text-[9px] uppercase tracking-wider text-wire-400"
+          >
+            Cancel
+          </button>
+        </footer>
+      </div>
+    </div>
   );
 }
 

@@ -1,8 +1,8 @@
-import { ANALYSTS, NAMED_ANALYSTS, SPECIALIST_ANALYSTS } from "./agents";
+import { ANALYSTS, NAMED_ANALYSTS, SPECIALIST_ANALYSTS, QUANT_ANALYSTS } from "./agents";
 import { displayThesisText } from "./thesisText";
 
 const MEMO_AGENT_KEYS = new Set(
-  [...NAMED_ANALYSTS, ...SPECIALIST_ANALYSTS].map((a) => a.key),
+  [...NAMED_ANALYSTS, ...SPECIALIST_ANALYSTS, ...QUANT_ANALYSTS].map((a) => a.key),
 );
 const EXCLUDED = new Set([
   "portfolio_manager",
@@ -10,6 +10,25 @@ const EXCLUDED = new Set([
   "debate_chamber",
   "argument_room",
 ]);
+
+export interface ThesisRevision {
+  id: string;
+  ts?: string;
+  prompt?: string;
+  before?: {
+    signal?: string;
+    confidence?: number;
+    thesis_summary?: string;
+    price_target?: number;
+  };
+  after?: {
+    signal?: string;
+    confidence?: number;
+    thesis_summary?: string;
+    price_target?: number;
+  };
+  reply_to_user?: string;
+}
 
 export interface CommitteeOpinion {
   agentName: string;
@@ -20,6 +39,9 @@ export interface CommitteeOpinion {
   timeHorizonMonths?: number;
   priceTarget?: number;
   upsidePct?: number;
+  referencePrice?: number;
+  revisionHistory?: ThesisRevision[];
+  userConsulted?: boolean;
 }
 
 function stripAgentSuffix(agentId: string): string {
@@ -84,6 +106,14 @@ export function collectCommitteeOpinions(
         typeof value.price_target === "number" ? value.price_target : undefined,
       upsidePct:
         typeof value.upside_pct === "number" ? value.upside_pct : undefined,
+      referencePrice:
+        typeof value.reference_price === "number"
+          ? value.reference_price
+          : undefined,
+      revisionHistory: Array.isArray(value.revision_history)
+        ? (value.revision_history as ThesisRevision[])
+        : undefined,
+      userConsulted: Boolean(value.user_consulted),
     });
   }
 

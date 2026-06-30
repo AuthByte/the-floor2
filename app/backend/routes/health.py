@@ -3,6 +3,8 @@ from fastapi.responses import StreamingResponse
 import asyncio
 import json
 
+from app.backend.config import app_version
+
 router = APIRouter()
 
 
@@ -13,7 +15,7 @@ async def root():
 
 @router.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "version": app_version()}
 
 
 @router.get("/ping")

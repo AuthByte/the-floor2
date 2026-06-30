@@ -17,6 +17,7 @@ export const DATA_ANALYSTS: AgentDef[] = [
   { key: "valuation_analyst",      name: "Valuation",        callsign: "DCF",   desk: "model bench",    role: "analyst" },
   { key: "sentiment_analyst",      name: "Sentiment",        callsign: "MOOD",  desk: "crowd mood",     role: "analyst" },
   { key: "news_sentiment_analyst", name: "News Sentiment",   callsign: "WIRE",  desk: "press wire",     role: "analyst" },
+  { key: "insider_activity_desk",  name: "Form 4 Watch",     callsign: "FORM4", desk: "form 4 watch",   role: "analyst" },
   { key: "growth_analyst",         name: "Growth",           callsign: "GROW",  desk: "growth pit",     role: "analyst" },
 ];
 
@@ -50,7 +51,10 @@ export const NAMED_ANALYSTS: AgentDef[] = [
   { key: "warren_buffett",         name: "Warren Buffett",          callsign: "OMHA",  desk: "moats & coke",      role: "analyst" },
 ];
 
-// === FURTHER ANALYSIS ===
+// === PERSONAS (runtime) ===
+// Populated via usePersonaAgents() from GET /personas — not hard-coded.
+export const PERSONA_ANALYSTS: AgentDef[] = [];
+
 // Specialist desks — not named-investor personas; run after the legend floor.
 export const SPECIALIST_ANALYSTS: AgentDef[] = [
   { key: "supply_chain_cartographer", name: "Supply Chain Cartographer", callsign: "LINK", desk: "supply web", role: "analyst" },
@@ -60,8 +64,17 @@ export const SPECIALIST_ANALYSTS: AgentDef[] = [
   { key: "unknown_unknowns",       name: "Unknown Unknowns",        callsign: "UNKWN",  desk: "thesis attack",   role: "analyst" },
 ];
 
+// === QUANT DESK (v2) ===
+// Pure-Python alpha models — run after further analysis, before debate.
+export const QUANT_ANALYSTS: AgentDef[] = [
+  { key: "quant_pead",            name: "PEAD Model",           callsign: "PEAD",  desk: "earnings drift",     role: "analyst" },
+  { key: "quant_momentum",        name: "Momentum Model",       callsign: "MOM",   desk: "trend factor",       role: "analyst" },
+  { key: "quant_mean_reversion",  name: "Mean Reversion Model", callsign: "MRVR",  desk: "fade extremes",      role: "analyst" },
+  { key: "quant_volatility",      name: "Volatility Model",     callsign: "VOL",   desk: "regime filter",      role: "analyst" },
+];
+
 // Combined analyst roster.
-export const ANALYSTS: AgentDef[] = [...DATA_ANALYSTS, ...NAMED_ANALYSTS, ...SPECIALIST_ANALYSTS];
+export const ANALYSTS: AgentDef[] = [...DATA_ANALYSTS, ...NAMED_ANALYSTS, ...SPECIALIST_ANALYSTS, ...QUANT_ANALYSTS];
 
 // Suffixes are deterministic 6-char [a-z0-9] strings so the backend's
 // extract_base_agent_key parses them cleanly. See app/backend/services/graph.py

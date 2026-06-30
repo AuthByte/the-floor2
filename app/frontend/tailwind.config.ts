@@ -136,6 +136,39 @@ const config: Config = {
           "0%": { opacity: "0", transform: "translateY(8px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        slideInRight: {
+          "0%": { opacity: "0", transform: "translateX(20px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
+        fadeIn: {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
+        },
+        wireIn: {
+          "0%": { opacity: "0", transform: "translateX(-10px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
+        scaleIn: {
+          "0%": { opacity: "0", transform: "scale(0.94)" },
+          "100%": { opacity: "1", transform: "scale(1)" },
+        },
+        deskDown: {
+          "0%": { opacity: "0", transform: "translateY(-10px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        softFloat: {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-5px)" },
+        },
+        popIn: {
+          "0%": { opacity: "0", transform: "scale(0.82)" },
+          "65%": { transform: "scale(1.05)" },
+          "100%": { opacity: "1", transform: "scale(1)" },
+        },
+        shimmer: {
+          "0%": { backgroundPosition: "200% 0" },
+          "100%": { backgroundPosition: "-200% 0" },
+        },
         sheen: {
           "0%": { transform: "translateX(-120%)" },
           "100%": { transform: "translateX(220%)" },
@@ -153,6 +186,14 @@ const config: Config = {
         bar: "bar 1.4s ease-in-out infinite",
         "pulse-dot": "pulseDot 1.8s ease-in-out infinite",
         "rise-in": "riseIn 0.4s cubic-bezier(0.16,1,0.3,1) both",
+        "slide-in-right": "slideInRight 0.45s cubic-bezier(0.16,1,0.3,1) both",
+        "fade-in": "fadeIn 0.32s ease-out both",
+        "wire-in": "wireIn 0.3s cubic-bezier(0.16,1,0.3,1) both",
+        "scale-in": "scaleIn 0.38s cubic-bezier(0.16,1,0.3,1) both",
+        "desk-down": "deskDown 0.42s cubic-bezier(0.16,1,0.3,1) both",
+        "soft-float": "softFloat 5.5s ease-in-out infinite",
+        "pop-in": "popIn 0.42s cubic-bezier(0.34,1.2,0.64,1) both",
+        shimmer: "shimmer 2.8s linear infinite",
         sheen: "sheen 2.6s ease-in-out infinite",
         ticker: "ticker 32s linear infinite",
       },

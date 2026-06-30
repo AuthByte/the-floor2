@@ -11,7 +11,7 @@ import statistics
 from langchain_core.messages import HumanMessage
 from src.graph.state import AgentState, show_agent_reasoning
 from src.utils.progress import progress
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 from src.tools.api import (
     get_financial_metrics,
     get_market_cap,
@@ -20,6 +20,7 @@ from src.tools.api import (
 )
 from src.utils.thesis_outlook import latest_close
 from src.utils.interactive_artifacts import build_valuation_analyst_artifacts
+from src.utils.tier0_emit import attach_data_sources, begin_ticker_fetch
 
 def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analyst_agent"):
     """Run valuation across tickers and write signals back to `state`."""
@@ -28,10 +29,11 @@ def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analys
     end_date = data["end_date"]
     start_date = data.get("start_date", end_date)
     tickers = data["tickers"]
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     valuation_analysis: dict[str, dict] = {}
 
     for ticker in tickers:
+        begin_ticker_fetch()
         progress.update_status(agent_id, ticker, "Fetching financial data")
 
         # --- Historical financial metrics ---
@@ -40,7 +42,7 @@ def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analys
             end_date=end_date,
             period="ttm",
             limit=8,
-            api_key=api_key,
+            api_key=api_keys,
         )
         if not financial_metrics:
             progress.update_status(agent_id, ticker, "Failed: No financial metrics found")
@@ -68,7 +70,7 @@ def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analys
             end_date=end_date,
             period="ttm",
             limit=8,
-            api_key=api_key,
+            api_key=api_keys,
         )
         if len(line_items) < 2:
             progress.update_status(agent_id, ticker, "Failed: Insufficient financial line items")
@@ -140,7 +142,7 @@ def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analys
         # ------------------------------------------------------------------
         # Aggregate & signal
         # ------------------------------------------------------------------
-        market_cap = get_market_cap(ticker, end_date, api_key=api_key)
+        market_cap = get_market_cap(ticker, end_date, api_key=api_keys)
         if not market_cap:
             progress.update_status(agent_id, ticker, "Failed: Market cap unavailable")
             continue
@@ -204,7 +206,7 @@ def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analys
                 "fcf_periods_analyzed": len(fcf_history)
             }
 
-        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_key)
+        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_keys)
         current_price = latest_close(prices)
         artifacts = build_valuation_analyst_artifacts(
             ticker,
@@ -227,7 +229,7 @@ def valuation_analyst_agent(state: AgentState, agent_id: str = "valuation_analys
             "reasoning": reasoning,
             "artifacts": artifacts,
         }
-        valuation_analysis[ticker] = payload
+        valuation_analysis[ticker] = attach_data_sources(payload)
         progress.update_status(agent_id, ticker, "Done", analysis=json.dumps(payload, indent=4))
 
     # ---- Emit message (for LLM tool chain) ----

@@ -14,7 +14,7 @@ from typing_extensions import Literal
 
 from src.graph.state import AgentState, show_agent_reasoning
 from src.tools.api import get_company_news, get_financial_metrics, get_insider_trades, get_macro_context, get_market_cap, get_prices, search_line_items
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 from src.utils.llm import call_llm
 from src.utils.progress import progress
 from src.utils.thesis_outlook import (
@@ -23,7 +23,7 @@ from src.utils.thesis_outlook import (
     ThesisOutlookFields,
     latest_close,
 )
-from src.utils.thesis_verdict import finish_from_signal
+from src.utils.thesis_verdict import finish_from_signal, merge_finish_outlook
 
 
 class LegendaryInvestorSignal(ThesisOutlookFields):
@@ -74,8 +74,8 @@ def run_legendary_agent(
     start_date = data["start_date"]
     end_date = data["end_date"]
     tickers = data["tickers"]
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
-    macro = data.get("macro_context") or get_macro_context(end_date, api_key)
+    api_keys = keys_from_state(state)
+    macro = data.get("macro_context") or get_macro_context(end_date, api_keys)
     if macro.get("available"):
         state["data"]["macro_context"] = macro
     tier0_ready = bool(data.get("tier0_complete"))
@@ -86,24 +86,29 @@ def run_legendary_agent(
             progress.update_status(agent_id, ticker, "Using Tier-0 briefings + cached market data")
         else:
             progress.update_status(agent_id, ticker, "Fetching market data")
-        metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=8, api_key=api_key)
+        metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=8, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Gathering financial line items")
-        line_items = search_line_items(ticker, LINE_ITEMS, end_date, period="ttm", limit=8, api_key=api_key)
+        line_items = search_line_items(ticker, LINE_ITEMS, end_date, period="ttm", limit=8, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Gathering prices and context")
-        market_cap = get_market_cap(ticker, end_date, api_key=api_key)
-        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_key)
+        market_cap = get_market_cap(ticker, end_date, api_key=api_keys)
+        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_keys)
         if tier0_ready:
             news = []
             insider_trades = []
         else:
-            news = get_company_news(ticker, end_date, limit=50, api_key=api_key)
-            insider_trades = get_insider_trades(ticker, end_date, limit=100, api_key=api_key)
+            news = get_company_news(ticker, end_date, limit=50, api_key=api_keys)
+            from src.agents._insider_utils import get_prefetched_insider_trades
+
+            insider_trades = get_prefetched_insider_trades(state, ticker)
+            if insider_trades is None:
+                insider_trades = get_insider_trades(ticker, end_date, limit=100, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, f"Running {investor_name} metrics")
         chart_ctx = {
             "ticker": ticker,
+            "end_date": end_date,
             "metrics": metrics,
             "line_items": line_items,
             "market_cap": market_cap,
@@ -175,6 +180,7 @@ def run_legendary_agent(
             state,
             artifacts=artifacts,
             current_price=latest_close(prices),
+            analysis_data=analysis,
             subagent_progress=subagent_progress,
         )
         signals[ticker] = {
@@ -186,10 +192,7 @@ def run_legendary_agent(
         if subagent_bundle:
             signals[ticker]["subagents"] = subagent_bundle["progress"]["subagents"]
             signals[ticker]["subagent_results"] = subagent_bundle["progress"]["subagent_results"]
-        for key in ("time_horizon_months", "price_target", "upside_pct", "reference_price"):
-            val = state["data"]["analyst_signals"].get(agent_id, {}).get(ticker, {}).get(key)
-            if val is not None:
-                signals[ticker][key] = val
+        merge_finish_outlook(signals[ticker], state, agent_id, ticker, thesis_summary=summary)
         if artifacts:
             signals[ticker]["artifacts"] = artifacts
 
@@ -384,12 +387,10 @@ def news_tone(news: list[Any]) -> dict[str, Any]:
     return {"negative_count": negative, "positive_count": positive, "total": total, "pessimism": pessimism, "optimism": optimism}
 
 
-def insider_tone(insider_trades: list[Any]) -> dict[str, Any]:
-    buys = sum(1 for t in insider_trades if (safe_get(t, "transaction_shares") or 0) > 0)
-    sells = sum(1 for t in insider_trades if (safe_get(t, "transaction_shares") or 0) < 0)
-    total = buys + sells
-    buy_ratio = buys / total if total else 0.5
-    return {"buys": buys, "sells": sells, "buy_ratio": buy_ratio}
+def insider_tone(insider_trades: list[Any], *, as_of: str | None = None) -> dict[str, Any]:
+    from src.agents._insider_utils import insider_tone as _insider_tone
+
+    return _insider_tone(insider_trades, as_of=as_of)
 
 
 def valuation_snapshot(metrics: list[Any], line_items: list[Any], market_cap: float | None) -> dict[str, Any]:

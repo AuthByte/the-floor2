@@ -75,6 +75,10 @@ export function InteractiveArtifact({ artifact }: Props) {
       return <BurryContrarian data={artifact.data} />;
     case "dalio_regime":
       return <DalioRegime data={artifact.data} />;
+    case "insider_timeline":
+      return <InsiderTimeline data={artifact.data} />;
+    case "insider_cluster_card":
+      return <InsiderClusterCard data={artifact.data} />;
     default:
       return null;
   }
@@ -104,6 +108,8 @@ export function isInteractiveArtifact(art: AgentArtifact): boolean {
     "growth_acceleration",
     "burry_contrarian",
     "dalio_regime",
+    "insider_timeline",
+    "insider_cluster_card",
   ].includes(k);
 }
 
@@ -841,5 +847,105 @@ function Empty({ label }: { label: string }) {
     <p className="py-6 text-center font-mono text-[9px] uppercase tracking-[0.24em] text-wire-600">
       {label}
     </p>
+  );
+}
+
+function InsiderTimeline({ data }: { data?: Record<string, unknown> }) {
+  const bars = arr<{ week: string; net_shares: number }>(data?.bars);
+  if (!bars.length) return <Empty label="No Form 4 filings in window" />;
+
+  const vals = bars.map((b) => b.net_shares);
+  const minV = Math.min(...vals, 0);
+  const maxV = Math.max(...vals, 1);
+  const span = maxV - minV || 1;
+  const w = 320;
+  const h = 28 + bars.length * 28;
+  const mid = h / 2;
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full">
+      <line x1={32} y1={mid} x2={w - 8} y2={mid} stroke={WIRE} strokeOpacity={0.35} />
+      {bars.map((b, i) => {
+        const y = 20 + i * 28;
+        const positive = b.net_shares >= 0;
+        const bw = (Math.abs(b.net_shares) / span) * (w - 80);
+        return (
+          <g key={b.week}>
+            <text x={4} y={y + 4} fill="#9ca3af" fontSize={8} fontFamily="monospace">
+              {b.week}
+            </text>
+            <rect
+              x={positive ? 72 : 72 - bw}
+              y={y - 5}
+              width={Math.max(2, bw)}
+              height={10}
+              fill={positive ? PHOS : SIREN}
+              fillOpacity={0.75}
+            />
+            <text x={72 + bw + 4} y={y + 4} fill={positive ? PHOS : SIREN} fontSize={8}>
+              {b.net_shares >= 0 ? "+" : ""}
+              {Math.round(b.net_shares).toLocaleString()}
+            </text>
+          </g>
+        );
+      })}
+      <text x={w / 2} y={h - 4} textAnchor="middle" fill={WIRE} fontSize={7}>
+        cluster {num(data?.cluster_score).toFixed(1)} · 90d net {num(data?.net_shares_90d).toLocaleString()}
+      </text>
+    </svg>
+  );
+}
+
+function InsiderClusterCard({ data }: { data?: Record<string, unknown> }) {
+  const buyers = arr<{ name?: string; title?: string; shares?: number; value?: number; date?: string }>(
+    data?.buyers,
+  );
+  const clusterScore = num(data?.cluster_score);
+  const uniqueBuyers = num(data?.unique_buyers_30d);
+  const alert = Boolean(data?.cluster_alert);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <Stat label="Cluster score" value={`${clusterScore.toFixed(1)}/10`} tone={alert ? "phos" : undefined} />
+        <Stat label="Buyers (30d)" value={String(uniqueBuyers)} />
+        {alert ? (
+          <span className="rounded border border-phos/40 bg-phos/10 px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider text-phos">
+            cluster alert
+          </span>
+        ) : null}
+      </div>
+      {buyers.length ? (
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[9px] font-mono">
+            <thead>
+              <tr className="border-b border-wire-800 text-wire-500">
+                <th className="p-1 text-left">Insider</th>
+                <th className="p-1 text-left">Title</th>
+                <th className="p-1 text-right">Shares</th>
+                <th className="p-1 text-right">Value</th>
+                <th className="p-1 text-right">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {buyers.map((b, i) => (
+                <tr key={`${b.name}-${i}`} className="border-b border-wire-900/60 text-wire-300">
+                  <td className="p-1">{str(b.name, "—")}</td>
+                  <td className="p-1 text-wire-500">{str(b.title, "—")}</td>
+                  <td className="p-1 text-right text-phos">+{num(b.shares).toLocaleString()}</td>
+                  <td className="p-1 text-right">{b.value != null ? formatMoney(b.value) : "—"}</td>
+                  <td className="p-1 text-right text-wire-500">{str(b.date).slice(0, 10)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <Empty label="No notable insider buys" />
+      )}
+      {data?.disclaimer ? (
+        <p className="text-[8px] leading-snug text-wire-600">{str(data.disclaimer)}</p>
+      ) : null}
+    </div>
   );
 }

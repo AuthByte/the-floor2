@@ -7,6 +7,7 @@ from src.graph.state import AgentState, show_agent_reasoning
 from pydantic import BaseModel, Field
 from typing_extensions import Literal
 from src.utils.progress import progress
+from src.utils.tier0_briefing import tier0_briefing_for_ticker
 from src.utils.llm import call_llm
 
 
@@ -60,6 +61,11 @@ def portfolio_management_agent(state: AgentState, agent_id: str = "portfolio_man
                 bucket = signals[ticker]
                 sig = bucket.get("signal")
                 conf = bucket.get("confidence")
+                if conf is None and bucket.get("conviction") is not None:
+                    try:
+                        conf = round(min(abs(float(bucket["conviction"])), 1.0) * 100)
+                    except (TypeError, ValueError):
+                        conf = None
                 if sig is not None and conf is not None:
                     compact = {"sig": sig, "conf": conf}
                     for src, dst in (
@@ -76,6 +82,14 @@ def portfolio_management_agent(state: AgentState, agent_id: str = "portfolio_man
 
     progress.update_status(agent_id, None, "Generating trading decisions")
 
+    run_id = state["data"].get("run_id")
+    if run_id:
+        from src.utils.live_run_registry import get_session
+
+        live = get_session(run_id)
+        if live:
+            live.set_phase("pm")
+
     result = generate_trading_decision(
         tickers=tickers,
         signals_by_ticker=signals_by_ticker,
@@ -85,6 +99,16 @@ def portfolio_management_agent(state: AgentState, agent_id: str = "portfolio_man
         agent_id=agent_id,
         state=state,
     )
+
+    if run_id:
+        from src.utils.live_run_registry import get_session
+
+        live = get_session(run_id)
+        if live:
+            for t, decision in result.decisions.items():
+                if t not in live.pm_baselines:
+                    live.pm_baselines[t] = decision.model_dump()
+
     message = HumanMessage(
         content=json.dumps({ticker: decision.model_dump() for ticker, decision in result.decisions.items()}),
         name=agent_id,
@@ -200,6 +224,8 @@ def generate_trading_decision(
         portfolio: dict[str, float],
         agent_id: str,
         state: AgentState,
+        *,
+        chair_context: bool = False,
 ) -> PortfolioManagerOutput:
     """Get decisions from the LLM with deterministic constraints and a minimal prompt."""
 
@@ -225,14 +251,25 @@ def generate_trading_decision(
     # Build compact payloads only for tickers sent to LLM
     compact_signals = _compact_signals({t: signals_by_ticker.get(t, {}) for t in tickers_for_llm})
     compact_allowed = {t: allowed_actions_full[t] for t in tickers_for_llm}
+    desk_context = {
+        t: tier0_briefing_for_ticker(state, t) for t in tickers_for_llm
+    }
+    desk_context = {t: v for t, v in desk_context.items() if v}
 
     # Minimal prompt template
+    chair_note = (
+        "Chair consulted agents mid-shift; revised signals marked user_consulted. "
+        "Weight those revisions appropriately.\n"
+        if chair_context
+        else ""
+    )
     template = ChatPromptTemplate.from_messages(
         [
             (
                 "system",
                 "You are a portfolio manager.\n"
-                "Inputs per ticker: analyst signals and allowed actions with max qty (already validated).\n"
+                + chair_note
+                + "Inputs per ticker: analyst signals and allowed actions with max qty (already validated).\n"
                 "Pick one allowed action per ticker and a quantity ≤ the max. "
                 "Keep reasoning very concise (max 100 chars). No cash or margin math. Return JSON only."
             ),
@@ -240,6 +277,7 @@ def generate_trading_decision(
                 "human",
                 "Signals:\n{signals}\n\n"
                 "Allowed:\n{allowed}\n\n"
+                "{desk_block}"
                 "Format:\n"
                 "{{\n"
                 '  "decisions": {{\n'
@@ -253,6 +291,13 @@ def generate_trading_decision(
     prompt_data = {
         "signals": json.dumps(compact_signals, separators=(",", ":"), ensure_ascii=False),
         "allowed": json.dumps(compact_allowed, separators=(",", ":"), ensure_ascii=False),
+        "desk_block": (
+            "Desk briefings (tier-0 + quant — use for conviction, do not re-fetch):\n"
+            + json.dumps(desk_context, ensure_ascii=False)
+            + "\n\n"
+            if desk_context
+            else ""
+        ),
     }
     prompt = template.invoke(prompt_data)
 

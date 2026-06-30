@@ -122,6 +122,7 @@ export interface InvestorJsonPayload {
   timeHorizonMonths?: number;
   priceTarget?: number;
   upsidePct?: number;
+  referencePrice?: number;
   evidence: MetricRow[];
   artifacts: AgentArtifact[];
 }
@@ -328,6 +329,8 @@ function parseInvestorJson(obj: Record<string, unknown>): InvestorJsonPayload | 
       typeof inner.price_target === "number" ? inner.price_target : undefined,
     upsidePct:
       typeof inner.upside_pct === "number" ? inner.upside_pct : undefined,
+    referencePrice:
+      typeof inner.reference_price === "number" ? inner.reference_price : undefined,
     evidence,
     artifacts: extractArtifacts(inner),
   };
@@ -364,6 +367,7 @@ export function parseAgentAnalysis(
         "valuation_analyst",
         "sentiment_analyst",
         "news_sentiment_analyst",
+        "insider_activity_desk",
         "growth_analyst",
       ].includes(agentKey) ||
       Object.values(unwrapped).some((v) => asSignalBlock(v))

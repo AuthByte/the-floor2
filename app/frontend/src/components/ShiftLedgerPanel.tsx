@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ShiftRecord } from "../lib/shiftLedger";
+import type { StoredShift } from "../lib/userData/types";
 import { formatShiftDate } from "../lib/shiftLedger";
+
+type LedgerEntry = ShiftRecord | StoredShift;
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  entries: ShiftRecord[];
+  entries: LedgerEntry[];
   onDelete: (id: string) => void;
   onClearAll: () => void;
+  onShare?: (entry: LedgerEntry) => void;
+  onReplay?: (entry: LedgerEntry) => void;
+  onScheduleAgain?: (entry: LedgerEntry) => void;
   cloudSynced?: boolean;
 }
 
@@ -33,6 +39,9 @@ export function ShiftLedgerPanel({
   entries,
   onDelete,
   onClearAll,
+  onShare,
+  onReplay,
+  onScheduleAgain,
   cloudSynced = false,
 }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -58,12 +67,12 @@ export function ShiftLedgerPanel({
 
   return (
     <div
-      className="absolute inset-0 z-40 flex justify-end bg-ink-950/55 backdrop-blur-[2px]"
+      className="desk-backdrop absolute inset-0 z-40 flex animate-fade-in justify-end bg-ink-950/55 backdrop-blur-[2px]"
       role="presentation"
       onMouseDown={onClose}
     >
       <aside
-        className="flex h-full w-full max-w-lg animate-rise-in flex-col border-l border-brass/25 bg-ink-950 shadow-float"
+        className="flex h-full w-full max-w-lg animate-slide-in-right flex-col border-l border-brass/25 bg-ink-950 shadow-float"
         role="dialog"
         aria-labelledby="shift-ledger-title"
         onMouseDown={(e) => e.stopPropagation()}
@@ -133,6 +142,13 @@ export function ShiftLedgerPanel({
                     onDelete(entry.id);
                     if (expandedId === entry.id) setExpandedId(null);
                   }}
+                  onShare={onShare ? () => onShare(entry) : undefined}
+                  onReplay={
+                    onReplay && entry.replay?.timeline?.length
+                      ? () => onReplay(entry)
+                      : undefined
+                  }
+                  onScheduleAgain={onScheduleAgain ? () => onScheduleAgain(entry) : undefined}
                 />
               ))}
             </ul>
@@ -148,11 +164,17 @@ function LedgerRow({
   expanded,
   onToggle,
   onDelete,
+  onShare,
+  onReplay,
+  onScheduleAgain,
 }: {
-  entry: ShiftRecord;
+  entry: LedgerEntry;
   expanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  onShare?: () => void;
+  onReplay?: () => void;
+  onScheduleAgain?: () => void;
 }) {
   return (
     <li className="overflow-hidden rounded-lg border border-wire-800 bg-ink-900/50">
@@ -230,13 +252,42 @@ function LedgerRow({
               </div>
             );
           })}
-          <button
-            type="button"
-            onClick={onDelete}
-            className="mt-2 text-[9px] uppercase tracking-[0.2em] text-wire-600 transition hover:text-siren"
-          >
-            delete entry
-          </button>
+          <div className="mt-3 flex flex-wrap gap-3">
+            {onReplay ? (
+              <button
+                type="button"
+                onClick={onReplay}
+                className="rounded border border-phos/40 bg-phos/10 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.2em] text-phos transition hover:bg-phos/20"
+              >
+                play replay
+              </button>
+            ) : null}
+            {onShare ? (
+              <button
+                type="button"
+                onClick={onShare}
+                className="rounded border border-brass/40 bg-brass/10 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.2em] text-brass transition hover:bg-brass/20"
+              >
+                share to feed
+              </button>
+            ) : null}
+            {onScheduleAgain ? (
+              <button
+                type="button"
+                onClick={onScheduleAgain}
+                className="rounded border border-phos/30 bg-phos/5 px-2.5 py-1 font-mono text-[9px] uppercase tracking-[0.2em] text-phos transition hover:bg-phos/15"
+              >
+                schedule again
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onDelete}
+              className="text-[9px] uppercase tracking-[0.2em] text-wire-600 transition hover:text-siren"
+            >
+              delete entry
+            </button>
+          </div>
         </div>
       ) : null}
     </li>
