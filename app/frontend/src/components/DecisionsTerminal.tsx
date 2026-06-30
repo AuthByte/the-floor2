@@ -3,7 +3,9 @@ import {
   collectCommitteeOpinions,
   tallyCommitteeOpinions,
   type CommitteeOpinion,
+  type ThesisRevision,
 } from "../lib/opinions";
+import { buildMemoDocument, ALPACA_LEGAL_DISCLAIMER } from "../lib/memoExport";
 import { outlookPlaqueLine } from "../lib/outlookFormat";
 import type {
   CompletePayload,
@@ -16,11 +18,25 @@ import type {
 } from "../lib/types";
 import { ArtifactGallery } from "./analysis/ArtifactGallery";
 import type { AgentArtifact } from "../lib/parseAgentAnalysis";
+import { PriceTargetTable } from "./PriceTargetTable";
+import { ChairImpactSection } from "./ChairImpactSection";
+import { MemoOutboundBar } from "./MemoOutboundBar";
+import { formatTokenCost, formatTokenCount, tokenUsageLine } from "../lib/tokenUsage";
 
 interface Props {
   data: CompletePayload | null;
   open: boolean;
   onDismiss: () => void;
+  runId?: string | null;
+  publishedPostId?: string | null;
+  onShareToFeed?: () => void;
+  canExecutePaper?: boolean;
+  paperExecuteEnabled?: boolean;
+  onPaperExecuteEnabledChange?: (on: boolean) => void;
+  onPaperExecute?: () => void;
+  paperExecuting?: boolean;
+  alpacaKeysConfigured?: boolean;
+  onOpenAccountSettings?: () => void;
 }
 
 /**
@@ -59,7 +75,21 @@ function verdictFor(action: string): Verdict {
   }
 }
 
-export function DecisionsTerminal({ data, open, onDismiss }: Props) {
+export function DecisionsTerminal({
+  data,
+  open,
+  onDismiss,
+  runId,
+  publishedPostId,
+  onShareToFeed,
+  canExecutePaper = false,
+  paperExecuteEnabled = false,
+  onPaperExecuteEnabledChange,
+  onPaperExecute,
+  paperExecuting = false,
+  alpacaKeysConfigured = false,
+  onOpenAccountSettings,
+}: Props) {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -71,6 +101,20 @@ export function DecisionsTerminal({ data, open, onDismiss }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onDismiss]);
 
+  const stamp = useMemo(
+    () => new Date().toISOString().replace("T", " ").slice(0, 19),
+    [open, data],
+  );
+
+  const memoDoc = useMemo(() => {
+    if (!data) return null;
+    return buildMemoDocument(data, {
+      runId: runId ?? "local",
+      publishedPostId,
+      stampUtc: stamp,
+    });
+  }, [data, runId, publishedPostId, stamp]);
+
   if (!data || !open) return null;
 
   const close = () => {
@@ -80,22 +124,26 @@ export function DecisionsTerminal({ data, open, onDismiss }: Props) {
   const decisions = data.decisions || {};
   const entries = Object.entries(decisions) as [string, FinalDecisionAction][];
   const analystSignals = data.analyst_signals ?? {};
-  const stamp = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const shiftTokens = data.token_usage?.total;
+  const showPaperExecute =
+    canExecutePaper &&
+    onPaperExecute &&
+    (!data.paper_trading || !data.paper_trading.enabled);
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center p-4"
+      className="boss-memo-overlay fixed inset-0 z-40 flex items-center justify-center p-4 print:static print:inset-auto print:z-auto print:block print:bg-white print:p-0"
       style={{
         background:
           "radial-gradient(120% 90% at 50% 0%, rgba(40,34,22,0.78), rgba(8,7,5,0.92))",
         backdropFilter: "blur(3px)",
       }}
     >
-      <div className="absolute inset-0" onClick={close} aria-hidden />
+      <div className="absolute inset-0 print:hidden" onClick={close} aria-hidden />
 
       {/* desk contact shadow */}
       <div
-        className="pointer-events-none absolute h-[78vh] w-full max-w-[760px] rounded-[40%]"
+        className="pointer-events-none absolute h-[78vh] w-full max-w-[760px] rounded-[40%] print:hidden"
         style={{
           bottom: "8vh",
           background: "rgba(0,0,0,0.55)",
@@ -108,7 +156,8 @@ export function DecisionsTerminal({ data, open, onDismiss }: Props) {
 
       {/* the memo sheet */}
       <div
-        className="relative z-10 flex max-h-[90vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[4px] font-mono"
+        id="boss-memo-sheet"
+        className="boss-memo-sheet relative z-10 flex max-h-[90vh] w-full max-w-[760px] flex-col overflow-hidden rounded-[4px] font-mono print:max-h-none print:max-w-none print:overflow-visible print:rounded-none print:shadow-none"
         role="dialog"
         aria-label="Boss memo"
         style={{
@@ -144,7 +193,7 @@ export function DecisionsTerminal({ data, open, onDismiss }: Props) {
             <button
               type="button"
               onClick={close}
-              className="rounded-[2px] px-2.5 py-1 text-[10px] uppercase tracking-[0.2em] transition-colors"
+              className="print:hidden rounded-[2px] px-2.5 py-1 text-[10px] uppercase tracking-[0.2em] transition-colors"
               style={{ border: `1px solid ${HAIR}`, color: INK_SOFT }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.color = BRASS;
@@ -173,7 +222,9 @@ export function DecisionsTerminal({ data, open, onDismiss }: Props) {
                 ticker={ticker}
                 action={action}
                 analystSignals={analystSignals}
+                currentPrices={data.current_prices}
                 shiftArtifacts={data.shift_artifacts?.[ticker]}
+                agentTokenUsage={data.token_usage?.agents}
                 first={i === 0}
               />
             ))
@@ -189,13 +240,32 @@ export function DecisionsTerminal({ data, open, onDismiss }: Props) {
           {data.memo_email?.enabled ? (
             <MemoEmailStatus mail={data.memo_email} />
           ) : null}
+          {data.chair_impact ? <ChairImpactSection impact={data.chair_impact} /> : null}
         </div>
 
-        {/* signature + seal */}
+        {/* outbound toolbar + signature */}
         <footer
-          className="relative flex shrink-0 items-end justify-between gap-4 px-6 py-5"
+          className="relative flex shrink-0 flex-col gap-3 px-6 py-5"
           style={{ borderTop: `1px solid ${HAIR}` }}
         >
+          {showPaperExecute ? (
+            <MemoPaperExecuteBar
+              enabled={paperExecuteEnabled}
+              onEnabledChange={onPaperExecuteEnabledChange}
+              onExecute={onPaperExecute}
+              executing={paperExecuting}
+              keysConfigured={alpacaKeysConfigured}
+              onOpenAccountSettings={onOpenAccountSettings}
+            />
+          ) : null}
+          {memoDoc ? (
+            <MemoOutboundBar
+              doc={memoDoc}
+              onShareToFeed={onShareToFeed}
+              publishedPostId={publishedPostId}
+            />
+          ) : null}
+          <div className="flex items-end justify-between gap-4">
           <div>
             <p
               className="text-[22px] italic"
@@ -206,6 +276,23 @@ export function DecisionsTerminal({ data, open, onDismiss }: Props) {
             <p className="mt-1 text-[9px] tracking-[0.18em]" style={{ color: FAINT }}>
               {entries.length} POSITION{entries.length === 1 ? "" : "S"} ·{" "}
               {data.paper_trading?.enabled ? "ALPACA PAPER" : "PAPER ONLY"}
+              {shiftTokens?.total_tokens ? (
+                <>
+                  {" "}
+                  · {formatTokenCount(shiftTokens.total_tokens)} TOKENS
+                  {formatTokenCost(shiftTokens.cost)
+                    ? ` · ${formatTokenCost(shiftTokens.cost)}`
+                    : ""}
+                </>
+              ) : null}
+            </p>
+            {shiftTokens?.total_tokens ? (
+              <p className="mt-1 text-[8.5px] tracking-[0.14em]" style={{ color: FAINT }}>
+                {tokenUsageLine(shiftTokens)}
+              </p>
+            ) : null}
+            <p className="mt-2 max-w-md text-[8px] leading-relaxed tracking-[0.06em]" style={{ color: FAINT }}>
+              {ALPACA_LEGAL_DISCLAIMER}
             </p>
           </div>
           <div className="relative flex flex-col items-center" style={{ animation: "seal-stamp 0.6s cubic-bezier(0.34,1.56,0.64,1) 0.7s both" }}>
@@ -222,6 +309,7 @@ export function DecisionsTerminal({ data, open, onDismiss }: Props) {
               {data.paper_trading?.enabled ? "EXECUTED · PAPER DESK" : "SIGNED OFF"}
             </span>
           </div>
+          </div>
         </footer>
       </div>
     </div>
@@ -236,13 +324,17 @@ function MemoRow({
   ticker,
   action,
   analystSignals,
+  currentPrices,
   shiftArtifacts,
+  agentTokenUsage,
   first,
 }: {
   ticker: string;
   action: FinalDecisionAction;
   analystSignals: Record<string, Record<string, unknown>>;
+  currentPrices?: Record<string, number>;
   shiftArtifacts?: ShiftArtifact[];
+  agentTokenUsage?: Record<string, import("../lib/tokenUsage").TokenUsageStats>;
   first: boolean;
 }) {
   const [open, setOpen] = useState(true);
@@ -345,7 +437,14 @@ function MemoRow({
       >
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           {opinions.map((op, idx) => (
-            <OpinionCard key={`${ticker}-${op.agentName}-${idx}`} op={op} index={idx} open={open} />
+            <OpinionCard
+              key={`${ticker}-${op.agentName}-${idx}`}
+              op={op}
+              index={idx}
+              open={open}
+              currentPrice={currentPrices?.[ticker]}
+              tokenUsage={agentTokenUsage?.[op.agentKey]}
+            />
           ))}
         </div>
         {shiftArts.length > 0 ? (
@@ -371,42 +470,161 @@ function OpinionCard({
   op,
   index,
   open,
+  currentPrice,
+  tokenUsage,
 }: {
   op: CommitteeOpinion;
   index: number;
   open: boolean;
+  currentPrice?: number;
+  tokenUsage?: import("../lib/tokenUsage").TokenUsageStats;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const sigColor =
     op.signal === "bullish" ? EMERALD : op.signal === "bearish" ? RED : FAINT;
   const outlookLine = outlookPlaqueLine(op);
+  const refPrice = op.referencePrice ?? currentPrice;
+  const hasTarget = op.priceTarget != null || refPrice != null;
+
   return (
     <div
-      className="rounded-[3px] px-2.5 py-2"
+      className="rounded-[3px]"
       style={{
         border: `1px solid ${HAIR}`,
         background: PAPER_HI,
         animation: open ? `theater-slide 0.4s cubic-bezier(0.16,1,0.3,1) ${Math.min(index * 45, 360)}ms both` : undefined,
       }}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-[10.5px] font-semibold tracking-[0.04em]" style={{ color: INK }}>
-          {op.agentName}
-        </span>
-        <span className="shrink-0 text-[10px] font-bold tracking-[0.08em]" style={{ color: sigColor }}>
-          {op.signal.toUpperCase()}
-          {op.confidence != null ? ` · ${op.confidence}%` : ""}
-        </span>
+      <button
+        type="button"
+        onClick={() => hasTarget && setExpanded((v) => !v)}
+        className={`w-full px-2.5 py-2 text-left ${hasTarget ? "cursor-pointer" : "cursor-default"}`}
+        aria-expanded={hasTarget ? expanded : undefined}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate text-[10.5px] font-semibold tracking-[0.04em]" style={{ color: INK }}>
+            {op.agentName}
+          </span>
+          <span className="shrink-0 text-[10px] font-bold tracking-[0.08em]" style={{ color: sigColor }}>
+            {op.signal.toUpperCase()}
+            {op.confidence != null ? ` · ${op.confidence}%` : ""}
+          </span>
+        </div>
+        {op.summary ? (
+          <p className="mt-1.5 text-[10.5px] leading-snug" style={{ color: INK_SOFT }}>
+            {op.userConsulted && op.revisionHistory?.length ? (
+              <span className="mr-1.5 font-mono text-[9px] uppercase tracking-[0.12em]" style={{ color: BRASS }}>
+                revised
+              </span>
+            ) : null}
+            {op.summary}
+          </p>
+        ) : null}
+        {outlookLine ? (
+          <p className="mt-1 font-mono text-[10px] tabular-nums" style={{ color: FAINT }}>
+            {outlookLine}
+            {hasTarget ? (
+              <span className="ml-2" style={{ color: BRASS }}>
+                {expanded ? "▾" : "▸"} targets
+              </span>
+            ) : null}
+          </p>
+        ) : null}
+        {tokenUsage?.total_tokens ? (
+          <p className="mt-1 font-mono text-[9px] tracking-[0.12em]" style={{ color: FAINT }}>
+            {tokenUsageLine(tokenUsage)}
+          </p>
+        ) : null}
+      </button>
+      {expanded && hasTarget ? (
+        <div className="border-t px-2 pb-2 pt-1" style={{ borderColor: HAIR }}>
+          <PriceTargetTable
+            variant="memo"
+            rows={[
+              {
+                agentName: op.agentName,
+                agentKey: op.agentKey,
+                currentPrice: refPrice,
+                priceTarget: op.priceTarget,
+                upsidePct: op.upsidePct,
+                timeHorizonMonths: op.timeHorizonMonths ?? 12,
+              },
+            ]}
+          />
+          {op.revisionHistory?.length ? (
+            <RevisionDiffBlock revisions={op.revisionHistory} />
+          ) : null}
+        </div>
+      ) : op.revisionHistory?.length ? (
+        <div className="border-t px-2 pb-2 pt-1" style={{ borderColor: HAIR }}>
+          <RevisionDiffBlock revisions={op.revisionHistory} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RevisionDiffBlock({ revisions }: { revisions: ThesisRevision[] }) {
+  const latest = revisions[revisions.length - 1];
+  if (!latest?.before || !latest?.after) return null;
+  const b = latest.before;
+  const a = latest.after;
+
+  return (
+    <div className="mt-2 rounded-[2px] border px-2 py-1.5" style={{ borderColor: HAIR, background: PAPER }}>
+      <p className="font-mono text-[8px] uppercase tracking-[0.18em]" style={{ color: BRASS }}>
+        chair consult diff
+      </p>
+      {latest.prompt ? (
+        <p className="mt-1 text-[9px] italic" style={{ color: FAINT }}>
+          Q: {latest.prompt}
+        </p>
+      ) : null}
+      <div className="mt-1.5 grid gap-1 font-mono text-[9px]">
+        <DiffLine label="signal" before={String(b.signal ?? "—")} after={String(a.signal ?? "—")} />
+        <DiffLine
+          label="conf"
+          before={b.confidence != null ? `${b.confidence}%` : "—"}
+          after={a.confidence != null ? `${Math.round(Number(a.confidence))}%` : "—"}
+        />
+        <DiffLine
+          label="PT"
+          before={b.price_target != null ? `$${b.price_target}` : "—"}
+          after={a.price_target != null ? `$${a.price_target}` : "—"}
+        />
       </div>
-      {op.summary ? (
-        <p className="mt-1.5 text-[10.5px] leading-snug" style={{ color: INK_SOFT }}>
-          {op.summary}
+      {latest.reply_to_user ? (
+        <p className="mt-1.5 text-[9px] leading-snug" style={{ color: INK_SOFT }}>
+          {latest.reply_to_user}
         </p>
       ) : null}
-      {outlookLine ? (
-        <p className="mt-1 font-mono text-[10px] tabular-nums" style={{ color: FAINT }}>
-          {outlookLine}
-        </p>
+      {b.thesis_summary && a.thesis_summary && b.thesis_summary !== a.thesis_summary ? (
+        <div className="mt-1.5 space-y-1 text-[9px] leading-snug">
+          <p className="line-through opacity-60" style={{ color: FAINT }}>
+            {b.thesis_summary}
+          </p>
+          <p style={{ color: INK }}>{a.thesis_summary}</p>
+        </div>
       ) : null}
+    </div>
+  );
+}
+
+function DiffLine({
+  label,
+  before,
+  after,
+}: {
+  label: string;
+  before: string;
+  after: string;
+}) {
+  const changed = before !== after;
+  return (
+    <div className="flex gap-2" style={{ color: changed ? INK : FAINT }}>
+      <span className="w-10 shrink-0 uppercase">{label}</span>
+      <span className={changed ? "line-through opacity-50" : ""}>{before}</span>
+      {changed ? <span style={{ color: EMERALD }}>→ {after}</span> : null}
     </div>
   );
 }
@@ -438,6 +656,93 @@ function MemoEmailStatus({ mail }: { mail: MemoEmailResult }) {
           : mail.error ??
             `Could not send to ${mail.to ?? "recipient"}. Enable “Email boss memo” before the shift and use your Resend account email while on the test sender.`}
       </p>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Paper execute (boss memo footer)                                   */
+/* ------------------------------------------------------------------ */
+
+function MemoPaperExecuteBar({
+  enabled,
+  onEnabledChange,
+  onExecute,
+  executing,
+  keysConfigured,
+  onOpenAccountSettings,
+}: {
+  enabled: boolean;
+  onEnabledChange?: (on: boolean) => void;
+  onExecute?: () => void;
+  executing: boolean;
+  keysConfigured: boolean;
+  onOpenAccountSettings?: () => void;
+}) {
+  const canSubmit = enabled && keysConfigured && !executing;
+
+  return (
+    <section
+      className="rounded-[3px] px-4 py-3"
+      style={{ border: `1px solid ${BRASS}55`, background: "rgba(165,126,34,0.07)" }}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="flex cursor-pointer items-center gap-2.5">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={(e) => onEnabledChange?.(e.target.checked)}
+            disabled={executing}
+            className="accent-[#A57E22]"
+          />
+          <span
+            className="text-[10px] font-semibold uppercase tracking-[0.24em]"
+            style={{ color: BRASS }}
+          >
+            paper execute
+          </span>
+          {enabled ? (
+            <span
+              className="rounded border px-1.5 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-[0.18em]"
+              style={{ borderColor: `${EMERALD}66`, color: EMERALD, background: "rgba(14,159,110,0.08)" }}
+            >
+              paper only
+            </span>
+          ) : null}
+        </label>
+        <button
+          type="button"
+          onClick={onExecute}
+          disabled={!canSubmit}
+          className="rounded border px-4 py-2 text-[10px] font-bold uppercase tracking-[0.24em] transition active:translate-y-px disabled:cursor-not-allowed disabled:opacity-40"
+          style={{
+            borderColor: canSubmit ? `${BRASS}` : `${HAIR}`,
+            background: canSubmit ? "rgba(165,126,34,0.16)" : "transparent",
+            color: canSubmit ? BRASS : FAINT,
+          }}
+        >
+          {executing ? "submitting…" : "submit to alpaca"}
+        </button>
+      </div>
+      {enabled && !keysConfigured ? (
+        <p className="mt-2 text-[10px] leading-relaxed" style={{ color: AMBER }}>
+          {onOpenAccountSettings ? (
+            <button
+              type="button"
+              onClick={onOpenAccountSettings}
+              className="underline decoration-amber-400/50 underline-offset-2"
+            >
+              Alpaca keys missing — add in account settings
+            </button>
+          ) : (
+            "Alpaca keys missing"
+          )}
+        </p>
+      ) : (
+        <p className="mt-2 text-[9px] leading-relaxed tracking-[0.06em]" style={{ color: FAINT }}>
+          Submit boss decisions to your Alpaca paper desk after you sign off on the memo.
+        </p>
+      )}
     </section>
   );
 }
@@ -499,12 +804,14 @@ function PaperTradingSection({ paper }: { paper: PaperTradingResult }) {
 
       {paper.orders.length > 0 ? (
         <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[400px] text-left text-[11px]">
+          <table className="w-full min-w-[520px] text-left text-[11px]">
             <thead>
               <tr className="text-[9px] uppercase tracking-[0.2em]" style={{ color: FAINT }}>
                 <th className="pb-1.5 pr-3">symbol</th>
                 <th className="pb-1.5 pr-3">action</th>
                 <th className="pb-1.5 pr-3">qty</th>
+                <th className="pb-1.5 pr-3">fill</th>
+                <th className="pb-1.5 pr-3">ref</th>
                 <th className="pb-1.5">status</th>
               </tr>
             </thead>
@@ -514,6 +821,12 @@ function PaperTradingSection({ paper }: { paper: PaperTradingResult }) {
                   <td className="py-1 pr-3" style={{ color: INK }}>{o.ticker}</td>
                   <td className="py-1 pr-3">{o.action}</td>
                   <td className="py-1 pr-3">{o.requested_qty}</td>
+                  <td className="py-1 pr-3" style={{ color: INK }}>
+                    {o.filled_avg_price != null ? fmtUsd(o.filled_avg_price) : "—"}
+                  </td>
+                  <td className="py-1 pr-3" style={{ color: FAINT }}>
+                    {o.ref_price != null ? fmtUsd(o.ref_price) : "—"}
+                  </td>
                   <td
                     className="py-1"
                     style={{
@@ -534,6 +847,10 @@ function PaperTradingSection({ paper }: { paper: PaperTradingResult }) {
           </table>
         </div>
       ) : null}
+
+      <p className="mt-3 text-[8px] leading-relaxed tracking-[0.06em]" style={{ color: FAINT }}>
+        {ALPACA_LEGAL_DISCLAIMER}
+      </p>
 
       {paper.positions.length > 0 ? (
         <div className="mt-3">

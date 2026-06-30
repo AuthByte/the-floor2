@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from src.graph.state import AgentState
-from src.utils.data_feed_keys import DATA_FEED_KEYS, TIER0_DESK_NAMES
+from src.utils.data_feed_keys import DATA_FEED_KEYS, QUANT_DESK_NAMES, TIER0_DESK_NAMES
 from src.utils.tier0_briefing import extract_base_agent_key
+from src.utils.tier0_summaries import format_tier0_summary
 
 _BEARISH = frozenset({"bearish"})
 _BULLISH = frozenset({"bullish"})
@@ -108,16 +109,31 @@ def _facts_from_reasoning(
             continue
         sig = block.get("signal")
         details = block.get("details") or block.get("detail")
-        if sig is None and details is None:
+        score = block.get("score")
+        metrics = block.get("metrics")
+
+        if sig is None and details is None and score is None and not metrics:
             continue
+
+        label = str(pillar).replace("_", " ")
+        detail_parts: list[str] = []
+        if details:
+            detail_parts.append(str(details))
+        if score is not None:
+            detail_parts.append(f"score={score}")
+        if isinstance(metrics, dict):
+            for mk, mv in list(metrics.items())[:8]:
+                if mv is not None:
+                    detail_parts.append(f"{mk}={mv}")
+
         ids.append(
             add_fact(
                 dossier,
                 kind="pillar",
-                label=str(pillar).replace("_", " "),
+                label=label,
                 value=_norm_signal(str(sig) if sig is not None else "neutral"),
                 source=source,
-                detail=str(details) if details is not None else None,
+                detail="; ".join(detail_parts)[:500] if detail_parts else None,
             )
         )
     return ids
@@ -128,6 +144,43 @@ def ingest_tier0_into_dossiers(
     tickers: list[str],
 ) -> dict[str, dict[str, list[dict[str, Any]]]]:
     """Seed dossiers from completed Tier-0 desk signals (idempotent per run)."""
+    return _ingest_desk_signals_into_dossiers(
+        state,
+        tickers,
+        desk_keys=DATA_FEED_KEYS,
+        desk_names=TIER0_DESK_NAMES,
+        replace_fact_kinds={"desk_signal", "pillar", "sec_metric", "data_source"},
+    )
+
+
+def ingest_quant_into_dossiers(
+    state: AgentState | dict[str, Any],
+    tickers: list[str],
+) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    """Append quant model facts to dossiers after the quant floor completes."""
+    from src.utils.agent_tiers import QUANT_KEYS
+
+    return _ingest_desk_signals_into_dossiers(
+        state,
+        tickers,
+        desk_keys=QUANT_KEYS,
+        desk_names=QUANT_DESK_NAMES,
+        replace_fact_kinds={"quant_signal", "quant_source"},
+        fact_kind="quant_signal",
+        source_fact_kind="quant_source",
+    )
+
+
+def _ingest_desk_signals_into_dossiers(
+    state: AgentState | dict[str, Any],
+    tickers: list[str],
+    *,
+    desk_keys: frozenset[str],
+    desk_names: dict[str, str],
+    replace_fact_kinds: set[str],
+    fact_kind: str = "desk_signal",
+    source_fact_kind: str = "data_source",
+) -> dict[str, dict[str, list[dict[str, Any]]]]:
     data = state.get("data") if isinstance(state, dict) else state["data"]
     signals = data.get("analyst_signals") or {}
     out: dict[str, dict[str, list[dict[str, Any]]]] = {}
@@ -137,36 +190,63 @@ def ingest_tier0_into_dossiers(
         dossier = ensure_dossier(state, key)
         # Replace tier-0 facts on each gate pass; keep investor claims/disputes.
         dossier["facts"] = [
-            f for f in dossier["facts"] if f.get("kind") not in {"desk_signal", "pillar", "sec_metric"}
+            f
+            for f in dossier["facts"]
+            if f.get("kind") not in replace_fact_kinds
         ]
         fact_ids: list[str] = []
 
         for agent_id, per_ticker in signals.items():
             base = extract_base_agent_key(agent_id)
-            if base not in DATA_FEED_KEYS or not isinstance(per_ticker, dict):
+            if base not in desk_keys or not isinstance(per_ticker, dict):
                 continue
             payload = per_ticker.get(key) or per_ticker.get(ticker)
             if not isinstance(payload, dict):
                 continue
 
-            desk = TIER0_DESK_NAMES.get(base, base.replace("_", " ").title())
-            summary = payload.get("thesis_summary") or payload.get("reasoning") or ""
-            if isinstance(summary, dict):
-                summary = str(summary)
-            summary = str(summary).strip()
+            desk = desk_names.get(base, base.replace("_", " ").title())
+            summary = format_tier0_summary(base, payload)
             if len(summary) > 400:
                 summary = summary[:397] + "..."
 
             fact_ids.append(
                 add_fact(
                     dossier,
-                    kind="desk_signal",
+                    kind=fact_kind,
                     label=desk,
                     value=_norm_signal(payload.get("signal")),
                     source=agent_id,
                     detail=summary or None,
                 )
             )
+            sources = payload.get("data_sources")
+            if isinstance(sources, dict):
+                for kind, src in sources.items():
+                    fact_ids.append(
+                        add_fact(
+                            dossier,
+                            kind=source_fact_kind,
+                            label=f"{desk} — {kind}",
+                            value=src,
+                            source=agent_id,
+                        )
+                    )
+            meta = payload.get("metadata")
+            if isinstance(meta, dict):
+                for kind, src in (
+                    ("prices", meta.get("price_source")),
+                    ("earnings", meta.get("earnings_source")),
+                ):
+                    if src:
+                        fact_ids.append(
+                            add_fact(
+                                dossier,
+                                kind=source_fact_kind,
+                                label=f"{desk} — {kind}",
+                                value=src,
+                                source=agent_id,
+                            )
+                        )
             fact_ids.extend(
                 _facts_from_reasoning(dossier, source=agent_id, reasoning=payload.get("reasoning"))
             )
@@ -322,7 +402,7 @@ def dossier_prompt_block(state: AgentState | dict[str, Any] | None, ticker: str)
     lines = [f"### { _norm_ticker(ticker) } — ticker dossier"]
     if facts:
         lines.append("**Verified desk facts**")
-        for f in facts[:14]:
+        for f in facts[:24]:
             detail = f" — {f['detail']}" if f.get("detail") else ""
             lines.append(f"- [{f['id']}] {f['label']}: {f['value']}{detail}")
     if claims:

@@ -28,10 +28,24 @@ class SupabaseClient:
         self.service_key = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
         self.anon_key = (os.getenv("SUPABASE_ANON_KEY") or "").strip()
         self.bucket = (os.getenv("SUPABASE_ARTIFACT_BUCKET") or "shift-artifacts").strip()
+        self._pg_client: Any | None = None
 
     @property
     def configured(self) -> bool:
         return bool(self.url and (self.service_key or self.anon_key))
+
+    @property
+    def client(self) -> Any:
+        """PostgREST client (service role) for server-side table access."""
+        if not self.configured:
+            raise RuntimeError("Supabase is not configured")
+        if not self.service_key:
+            raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY required for server table access")
+        if self._pg_client is None:
+            from supabase import create_client
+
+            self._pg_client = create_client(self.url, self.service_key)
+        return self._pg_client
 
     def _bearer(self, user_jwt: str | None = None) -> str | None:
         return user_jwt or get_user_access_token() or self.service_key or None
@@ -102,6 +116,57 @@ class SupabaseClient:
                 return None
             data = res.json()
             return data[0] if isinstance(data, list) and data else None
+
+    def _service_headers(self) -> dict[str, str]:
+        if not self.service_key:
+            raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY required for server reads")
+        apikey = self.anon_key or self.service_key
+        return {
+            "Authorization": f"Bearer {self.service_key}",
+            "apikey": apikey,
+            "Content-Type": "application/json",
+        }
+
+    def _rest_headers(self) -> dict[str, str]:
+        """Prefer service role; fall back to anon for read-only public surfaces."""
+        if self.service_key:
+            return self._service_headers()
+        if self.anon_key:
+            return {
+                "Authorization": f"Bearer {self.anon_key}",
+                "apikey": self.anon_key,
+                "Content-Type": "application/json",
+            }
+        raise RuntimeError("SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY required for server reads")
+
+    def rest_select_one(
+        self,
+        table: str,
+        *,
+        select: str,
+        filters: dict[str, str],
+    ) -> dict[str, Any] | None:
+        """Service-role GET returning the first matching row (anon fallback for public reads)."""
+        if not self.configured:
+            return None
+        params: dict[str, str] = {"select": select, "limit": "1"}
+        for key, value in filters.items():
+            params[key] = f"eq.{value}"
+        with httpx.Client(timeout=30.0) as client:
+            res = client.get(
+                f"{self.url}/rest/v1/{table}",
+                headers=self._rest_headers(),
+                params=params,
+            )
+            if res.status_code == 404:
+                return None
+            if res.status_code >= 400:
+                logger.warning("Supabase select %s failed: %s %s", table, res.status_code, res.text)
+                return None
+            data = res.json()
+            if isinstance(data, list) and data:
+                return data[0]
+            return None
 
 
 _client: SupabaseClient | None = None

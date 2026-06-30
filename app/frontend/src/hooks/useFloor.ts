@@ -1,32 +1,29 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ANALYSTS,
-  DATA_ANALYSTS,
-  NAMED_ANALYSTS,
-  SPECIALIST_ANALYSTS,
   PORTFOLIO_MANAGER,
   PORTFOLIO_MANAGER_ID,
-  RISK_MANAGER,
-  RISK_MANAGER_ID,
-  RISK_PIPELINE_AGENTS,
   roomIdFor,
 } from "../lib/agents";
-import {
-  applyRoomProgress,
-  clearAnalysisThrottle,
-} from "../lib/applyRoomProgress";
-import {
-  CONSULTATION_ID,
-  DEBATE_ROOM_ID,
-  RISK_FORGE_ID,
-  RISK_RESEARCH_HUB_ID,
-  RISK_WATCHTOWER_ID,
-  SCENARIO_LAB_ID,
-} from "../lib/layout";
-import { resolveProgressRoomId } from "../lib/progressRoomId";
+import { clearAnalysisThrottle } from "../lib/applyRoomProgress";
 import { resolveTickers, runHedgeFund } from "../lib/api";
-import { parseWatchlistInput } from "../lib/tickerInput";
+import type { WatchlistPreset } from "../lib/watchlists";
 import { PROVIDER } from "../lib/models";
+import { parseWatchlistInput } from "../lib/tickerInput";
+import {
+  applySessionToFloorState,
+  buildInitialRooms,
+  buildRunningRooms,
+  commitBootstrapLogs,
+  createShiftSessionRuntime,
+  createShiftStreamHandlers,
+  MAX_SHELVED_RUNS,
+  newShelfId,
+  snapshotSession,
+  type AutoPublishDigestInput,
+  type ShiftSession,
+  type ShiftSessionRuntime,
+} from "../lib/shiftSession";
 import type {
   CompletePayload,
   GraphEdge,
@@ -36,53 +33,33 @@ import type {
   RunState,
 } from "../lib/types";
 
-function makeIdleRoom(): RoomState {
-  return {
-    status: "STANDBY",
-    ticker: null,
-    message: "offline",
-    analysis: null,
-    updatedAt: 0,
-    history: [],
-    verdict: null,
-  };
-}
-
-export function buildInitialRooms(): Record<string, RoomState> {
-  const map: Record<string, RoomState> = {};
-  for (const a of ANALYSTS) map[roomIdFor(a.key)] = makeIdleRoom();
-  map[DEBATE_ROOM_ID] = {
-    ...makeIdleRoom(),
-    message: "chamber idle",
-    debateFeed: [],
-    debateRounds: [],
-    activeDebateTicker: null,
-  };
-  map[CONSULTATION_ID] = { ...makeIdleRoom(), message: "no consults", consultations: [] };
-  for (const a of RISK_PIPELINE_AGENTS) {
-    map[a.key] = { ...makeIdleRoom(), message: "pipeline idle" };
-  }
-  map[PORTFOLIO_MANAGER_ID] = makeIdleRoom();
-  map[RISK_MANAGER_ID] = makeIdleRoom();
-  return map;
-}
+export { buildInitialRooms };
 
 export interface FloorOptions {
   tickers: string;
   model: string;
   initialCash: number;
   openrouterKey: string;
-  alpacaPaper: boolean;
   alpacaKeyId: string;
   alpacaSecret: string;
   memoEmail: boolean;
   digestEmail: string;
   resendApiKey: string;
-  /** Analyst agent keys to include in this shift (PM + risk always run). */
   enabledAgentKeys: string[];
   runRiskPipeline?: boolean;
-  /** Called after NL/symbol resolution with the final ticker list. */
   onTickersResolved?: (tickers: string[], rationale: string) => void;
+}
+
+export type { AutoPublishDigestInput };
+
+export interface UseFloorConfig {
+  watchlists?: WatchlistPreset[];
+  hasUserSession?: boolean;
+  getLastDigestRunTs?: (watchlistId: string) => number;
+  setLastDigestRunTs?: (watchlistId: string, ts: number) => void;
+  onAutoPublishDigest?: (input: AutoPublishDigestInput) => Promise<void>;
+  onPaywall?: (payload: import("../lib/entitlements").PaywallPayload) => void;
+  onShelvedSessionComplete?: (session: ShiftSession) => void;
 }
 
 export interface FloorController {
@@ -95,12 +72,43 @@ export interface FloorController {
   shiftStartedAt: number | null;
   shiftRunId: string | null;
   resolvingTickers: boolean;
+  shelvedRuns: ShiftSession[];
+  canShelf: boolean;
   start: (opts: FloorOptions) => Promise<void>;
   stop: () => void;
   reset: () => void;
+  shelfActiveRun: () => boolean;
+  restoreShelf: (shelfId: string) => boolean;
+  discardShelf: (shelfId: string) => void;
+  applyPaperTrading: (paper: import("../lib/types").PaperTradingResult) => void;
 }
 
-export function useFloor(): FloorController {
+function resetActiveUiState(): {
+  rooms: Record<string, RoomState>;
+  log: LogLine[];
+  runState: RunState;
+  errorMsg: string | null;
+  decisions: CompletePayload | null;
+  shiftTickers: string[];
+  shiftStartedAt: number | null;
+  shiftRunId: string | null;
+} {
+  return {
+    rooms: buildInitialRooms(),
+    log: [],
+    runState: "idle",
+    errorMsg: null,
+    decisions: null,
+    shiftTickers: [],
+    shiftStartedAt: null,
+    shiftRunId: null,
+  };
+}
+
+export function useFloor(config?: UseFloorConfig): FloorController {
+  const configRef = useRef(config);
+  configRef.current = config;
+
   const [rooms, setRooms] = useState<Record<string, RoomState>>(() =>
     buildInitialRooms(),
   );
@@ -112,80 +120,206 @@ export function useFloor(): FloorController {
   const [shiftStartedAt, setShiftStartedAt] = useState<number | null>(null);
   const [shiftRunId, setShiftRunId] = useState<string | null>(null);
   const [resolvingTickers, setResolvingTickers] = useState(false);
-  const abortRef = useRef<(() => void) | null>(null);
-  const logIdRef = useRef(0);
-  const shiftGenRef = useRef(0);
-  const pendingRoomRef = useRef<
-    Record<string, { payload: Parameters<typeof applyRoomProgress>[1]; tickerSet: Set<string> }>
-  >({});
-  const flushRafRef = useRef<number | null>(null);
-  const lastLogStatusRef = useRef<Record<string, string>>({});
+  const [shelvedRuns, setShelvedRuns] = useState<ShiftSession[]>([]);
 
-  const pushLog = useCallback((line: Omit<LogLine, "id">) => {
-    setLog((prev) => {
-      const id = `l${++logIdRef.current}`;
-      const next = [...prev, { ...line, id }];
-      // cap the buffer so we never drown the dom
-      return next.length > 400 ? next.slice(-400) : next;
-    });
+  const activeShelfIdRef = useRef<string | null>(null);
+  const activeRuntimeRef = useRef<ShiftSessionRuntime | null>(null);
+  const shelvedRuntimesRef = useRef<Map<string, ShiftSessionRuntime>>(new Map());
+  const discardedShelfIdsRef = useRef<Set<string>>(new Set());
+
+  const notifyShelvedList = useCallback(() => {
+    setShelvedRuns(
+      Array.from(shelvedRuntimesRef.current.values()).map((rt) =>
+        snapshotSession(rt.session),
+      ),
+    );
   }, []);
 
-  const flushRoomPatches = useCallback(() => {
-    const batch = pendingRoomRef.current;
-    pendingRoomRef.current = {};
-    if (Object.keys(batch).length === 0) return;
-    setRooms((prev) => {
-      let next: Record<string, RoomState> | null = null;
-      for (const [agent, { payload, tickerSet }] of Object.entries(batch)) {
-        const cur = (next ?? prev)[agent];
-        if (!cur) continue;
-        const updated = applyRoomProgress(cur, payload, tickerSet);
-        if (updated === cur) continue;
-        if (!next) next = { ...prev };
-        next[agent] = updated;
+  const applySessionToReact = useCallback((session: ShiftSession) => {
+    const applied = applySessionToFloorState(session);
+    setRooms(applied.rooms);
+    setLog(applied.log);
+    setRunState(applied.runState);
+    setErrorMsg(applied.errorMsg);
+    setDecisions(applied.decisions);
+    setShiftTickers(applied.shiftTickers);
+    setShiftStartedAt(applied.shiftStartedAt);
+    setShiftRunId(applied.shiftRunId);
+  }, []);
+
+  const resetActiveUi = useCallback(() => {
+    clearAnalysisThrottle();
+    const fresh = resetActiveUiState();
+    setRooms(fresh.rooms);
+    setLog(fresh.log);
+    setRunState(fresh.runState);
+    setErrorMsg(fresh.errorMsg);
+    setDecisions(fresh.decisions);
+    setShiftTickers(fresh.shiftTickers);
+    setShiftStartedAt(fresh.shiftStartedAt);
+    setShiftRunId(fresh.shiftRunId);
+  }, []);
+
+  const isSessionDiscarded = useCallback((shelfId: string) => {
+    if (discardedShelfIdsRef.current.has(shelfId)) return true;
+    if (activeShelfIdRef.current === shelfId) return false;
+    return !shelvedRuntimesRef.current.has(shelfId);
+  }, []);
+
+  const handleSessionChange = useCallback(
+    (session: ShiftSession) => {
+      if (activeShelfIdRef.current === session.shelfId) {
+        applySessionToReact(session);
+        return;
       }
-      return next ?? prev;
-    });
-  }, []);
+      if (shelvedRuntimesRef.current.has(session.shelfId)) {
+        const rt = shelvedRuntimesRef.current.get(session.shelfId)!;
+        rt.session = session;
+        notifyShelvedList();
+      }
+    },
+    [applySessionToReact, notifyShelvedList],
+  );
 
-  const scheduleRoomPatch = useCallback(
-    (agent: string, payload: Parameters<typeof applyRoomProgress>[1], tickerSet: Set<string>) => {
-      pendingRoomRef.current[agent] = { payload, tickerSet };
-      if (flushRafRef.current != null) return;
-      flushRafRef.current = requestAnimationFrame(() => {
-        flushRafRef.current = null;
-        flushRoomPatches();
+  const handleShelvedComplete = useCallback(
+    (session: ShiftSession) => {
+      if (activeShelfIdRef.current === session.shelfId) return;
+      configRef.current?.onShelvedSessionComplete?.(session);
+    },
+    [],
+  );
+
+  const makeStreamDeps = useCallback(
+    (runtime: ShiftSessionRuntime, shelfId: string, tickerList: string[], startedAt: number) => ({
+      session: runtime.session,
+      buffers: runtime.buffers,
+      tickerSet: runtime.tickerSet,
+      tickerList,
+      startedAt,
+      isDiscarded: () => isSessionDiscarded(shelfId),
+      onSessionChange: handleSessionChange,
+      onShelvedComplete: handleShelvedComplete,
+      onPaywall: (payload: import("../lib/entitlements").PaywallPayload) => {
+        configRef.current?.onPaywall?.(payload);
+        if (activeShelfIdRef.current === shelfId) {
+          runtime.session.abort?.();
+          runtime.session.abort = null;
+          activeRuntimeRef.current = null;
+          activeShelfIdRef.current = null;
+          resetActiveUi();
+        }
+      },
+      onAutoPublishDigest: configRef.current?.onAutoPublishDigest,
+      watchlists: configRef.current?.watchlists,
+      hasUserSession: configRef.current?.hasUserSession,
+      getLastDigestRunTs: configRef.current?.getLastDigestRunTs,
+      setLastDigestRunTs: configRef.current?.setLastDigestRunTs,
+    }),
+    [handleSessionChange, handleShelvedComplete, isSessionDiscarded, resetActiveUi],
+  );
+
+  const pushLogToActive = useCallback(
+    (line: Omit<LogLine, "id">) => {
+      setLog((prev) => {
+        const next = [...prev, { ...line, id: `l${prev.length + 1}` }];
+        return next.length > 400 ? next.slice(-400) : next;
       });
     },
-    [flushRoomPatches],
+    [],
   );
 
   const reset = useCallback(() => {
-    abortRef.current?.();
-    abortRef.current = null;
-    if (flushRafRef.current != null) {
-      cancelAnimationFrame(flushRafRef.current);
-      flushRafRef.current = null;
+    if (activeRuntimeRef.current?.session.status === "running") {
+      activeRuntimeRef.current.session.abort?.();
     }
-    pendingRoomRef.current = {};
-    lastLogStatusRef.current = {};
-    clearAnalysisThrottle();
-    setRooms(buildInitialRooms());
-    setLog([]);
-    setDecisions(null);
-    setErrorMsg(null);
-    setRunState("idle");
-    setShiftTickers([]);
-    setShiftStartedAt(null);
-    setShiftRunId(null);
+    activeRuntimeRef.current = null;
+    activeShelfIdRef.current = null;
+    resetActiveUi();
     setResolvingTickers(false);
-  }, []);
+  }, [resetActiveUi]);
+
+  const applyPaperTrading = useCallback(
+    (paper: import("../lib/types").PaperTradingResult) => {
+      setDecisions((prev) => (prev ? { ...prev, paper_trading: paper } : prev));
+      if (activeRuntimeRef.current?.session.decisions) {
+        activeRuntimeRef.current.session.decisions = {
+          ...activeRuntimeRef.current.session.decisions,
+          paper_trading: paper,
+        };
+      }
+      pushLogToActive({
+        ts: Date.now(),
+        callsign: "PAPER",
+        ticker: null,
+        status: paper.enabled
+          ? "boss memo · Alpaca paper orders submitted."
+          : paper.skipped_reason
+            ? `Alpaca paper skipped: ${paper.skipped_reason}`
+            : "boss memo · Alpaca paper updated.",
+        level: paper.enabled ? "ok" : paper.skipped_reason ? "warn" : "info",
+      });
+    },
+    [pushLogToActive],
+  );
 
   const stop = useCallback(() => {
-    abortRef.current?.();
-    abortRef.current = null;
+    if (activeRuntimeRef.current?.session.status === "running") {
+      activeRuntimeRef.current.session.abort?.();
+      activeRuntimeRef.current.session.abort = null;
+    }
+    activeRuntimeRef.current = null;
+    activeShelfIdRef.current = null;
     setRunState((cur) => (cur === "running" ? "idle" : cur));
   }, []);
+
+  const shelfActiveRun = useCallback((): boolean => {
+    if (runState !== "running" || !activeRuntimeRef.current) return false;
+    if (shelvedRuntimesRef.current.size >= MAX_SHELVED_RUNS) {
+      setErrorMsg("Max 2 shelved shifts — discard one from the shelf tray first.");
+      return false;
+    }
+
+    const rt = activeRuntimeRef.current;
+    shelvedRuntimesRef.current.set(rt.session.shelfId, rt);
+    activeRuntimeRef.current = null;
+    activeShelfIdRef.current = null;
+    notifyShelvedList();
+    resetActiveUi();
+    return true;
+  }, [runState, notifyShelvedList, resetActiveUi]);
+
+  const restoreShelf = useCallback(
+    (shelfId: string): boolean => {
+      const rt = shelvedRuntimesRef.current.get(shelfId);
+      if (!rt) return false;
+
+      if (runState === "running" && activeRuntimeRef.current) {
+        if (!shelfActiveRun()) return false;
+      }
+
+      shelvedRuntimesRef.current.delete(shelfId);
+      activeRuntimeRef.current = rt;
+      activeShelfIdRef.current = shelfId;
+      applySessionToReact(rt.session);
+      notifyShelvedList();
+      return true;
+    },
+    [runState, shelfActiveRun, applySessionToReact, notifyShelvedList],
+  );
+
+  const discardShelf = useCallback(
+    (shelfId: string) => {
+      const rt = shelvedRuntimesRef.current.get(shelfId);
+      if (!rt) return;
+      discardedShelfIdsRef.current.add(shelfId);
+      rt.discarded = true;
+      rt.session.abort?.();
+      rt.session.abort = null;
+      shelvedRuntimesRef.current.delete(shelfId);
+      notifyShelvedList();
+    },
+    [notifyShelvedList],
+  );
 
   const start = useCallback(
     async ({
@@ -193,7 +327,6 @@ export function useFloor(): FloorController {
       model,
       initialCash,
       openrouterKey,
-      alpacaPaper,
       alpacaKeyId,
       alpacaSecret,
       memoEmail,
@@ -269,93 +402,42 @@ export function useFloor(): FloorController {
 
       onTickersResolved?.(tickerList, resolveNote);
 
-      abortRef.current?.();
-      if (flushRafRef.current != null) {
-        cancelAnimationFrame(flushRafRef.current);
-        flushRafRef.current = null;
+      if (activeRuntimeRef.current?.session.status === "running") {
+        activeRuntimeRef.current.session.abort?.();
       }
-      pendingRoomRef.current = {};
-      lastLogStatusRef.current = {};
+      activeRuntimeRef.current = null;
+      activeShelfIdRef.current = null;
       clearAnalysisThrottle();
 
-      const shiftGen = ++shiftGenRef.current;
-      const tickerSet = new Set(tickerList);
+      const shelfId = newShelfId();
+      const startedAt = Date.now();
+      const label =
+        tickerList.length <= 3
+          ? tickerList.join(", ")
+          : `${tickerList.slice(0, 2).join(", ")} +${tickerList.length - 2}`;
 
-      // fresh start — wipe prior theses and logs
+      const runningRooms = buildRunningRooms(enabled, runRiskPipeline);
+      const runtime = createShiftSessionRuntime({
+        shelfId,
+        label,
+        tickerList,
+        model,
+        analystCount: activeAnalysts.length,
+        startedAt,
+        rooms: runningRooms,
+      });
+
+      activeRuntimeRef.current = runtime;
+      activeShelfIdRef.current = shelfId;
+
       setErrorMsg(null);
       setDecisions(null);
       setLog([]);
       setShiftTickers(tickerList);
-      setShiftStartedAt(Date.now());
+      setShiftStartedAt(startedAt);
       setShiftRunId(null);
       setRunState("running");
-      const dataFeedOn = DATA_ANALYSTS.some((a) => enabled.has(a.key));
-
-      setRooms(() => {
-        const fresh = buildInitialRooms();
-        for (const a of ANALYSTS) {
-          const id = roomIdFor(a.key);
-          if (enabled.has(a.key)) {
-            const isTier1 = NAMED_ANALYSTS.some((n) => n.key === a.key)
-              || SPECIALIST_ANALYSTS.some((n) => n.key === a.key);
-            fresh[id] = {
-              ...fresh[id],
-              status: "STANDBY",
-              message:
-                isTier1 && dataFeedOn ? "awaiting tier-0 feeds" : "queued",
-              ticker: null,
-              analysis: null,
-              history: [],
-            };
-          } else {
-            fresh[id] = {
-              ...fresh[id],
-              status: "STANDBY",
-              message: "offline",
-              ticker: null,
-              analysis: null,
-            };
-          }
-        }
-        fresh[PORTFOLIO_MANAGER_ID] = {
-          ...fresh[PORTFOLIO_MANAGER_ID],
-          status: "STANDBY",
-          message: "queued",
-          ticker: null,
-          analysis: null,
-          history: [],
-        };
-        fresh[RISK_MANAGER_ID] = {
-          ...fresh[RISK_MANAGER_ID],
-          status: "STANDBY",
-          message: "queued",
-          ticker: null,
-          analysis: null,
-          history: [],
-        };
-        fresh[DEBATE_ROOM_ID] = {
-          ...fresh[DEBATE_ROOM_ID],
-          status: "STANDBY",
-          message: "awaiting analysts",
-          ticker: null,
-          analysis: null,
-          debateFeed: [],
-          debateRounds: [],
-          activeDebateTicker: null,
-          history: [],
-        };
-        for (const a of RISK_PIPELINE_AGENTS) {
-          fresh[a.key] = {
-            ...fresh[a.key],
-            status: runRiskPipeline ? "STANDBY" : "STANDBY",
-            message: runRiskPipeline ? "queued" : "skipped",
-            ticker: null,
-            analysis: null,
-            history: [],
-          };
-        }
-        return fresh;
-      });
+      setRooms(runningRooms);
 
       const graphNodes: GraphNode[] = [
         ...activeAnalysts.map<GraphNode>((a) => ({
@@ -377,7 +459,7 @@ export function useFloor(): FloorController {
       }));
 
       if (parsed.kind !== "direct") {
-        pushLog({
+        runtime.buffers.pendingLog.push({
           ts: Date.now(),
           callsign: "SYS",
           ticker: null,
@@ -386,13 +468,18 @@ export function useFloor(): FloorController {
         });
       }
 
-      pushLog({
+      runtime.buffers.pendingLog.push({
         ts: Date.now(),
         callsign: "SYS",
         ticker: null,
         status: `dispatching ${activeAnalysts.length} analysts on ${tickerList.join(", ")}`,
         level: "ok",
       });
+
+      const handlers = createShiftStreamHandlers(
+        makeStreamDeps(runtime, shelfId, tickerList, startedAt),
+      );
+      handleSessionChange(commitBootstrapLogs(runtime));
 
       const abort = runHedgeFund(
         {
@@ -404,154 +491,23 @@ export function useFloor(): FloorController {
           model_provider: PROVIDER,
           initial_cash: initialCash,
           margin_requirement: 0,
-          execute_alpaca_paper: alpacaPaper,
+          execute_alpaca_paper: false,
           run_risk_pipeline: runRiskPipeline,
           send_memo_email: memoEmail && digestEmail.trim().length > 0,
           digest_email: memoEmail ? digestEmail.trim() : undefined,
           api_keys: Object.keys(apiKeys).length > 0 ? apiKeys : undefined,
         },
-        {
-          onStart: (runId) => {
-            if (shiftGen !== shiftGenRef.current) return;
-            setShiftRunId(runId);
-            pushLog({
-              ts: Date.now(),
-              callsign: "SYS",
-              ticker: null,
-              status: "shift starting…",
-              level: "info",
-            });
-          },
-          onProgress: ({
-            agent,
-            ticker,
-            status,
-            analysis,
-            timestamp,
-            signal,
-            confidence,
-            thesis_summary,
-          }) => {
-            if (shiftGen !== shiftGenRef.current) return;
-
-            const ts = timestamp ? Date.parse(timestamp) : Date.now();
-            const roomId = resolveProgressRoomId(agent);
-            scheduleRoomPatch(
-              roomId,
-              {
-                agent: roomId,
-                ticker,
-                status,
-                analysis,
-                timestamp,
-                signal,
-                confidence,
-                thesis_summary,
-              },
-              tickerSet,
-            );
-
-            const prevStatus = lastLogStatusRef.current[agent];
-            if (prevStatus === status) return;
-            lastLogStatusRef.current[agent] = status;
-
-            const consultReply =
-              agent === CONSULTATION_ID && status.includes('":');
-            pushLog({
-              ts,
-              callsign: callsignFor(agent),
-              roomId: agent,
-              ticker,
-              status,
-              level:
-                status.toLowerCase() === "done"
-                  ? "ok"
-                  : status.toLowerCase().startsWith("error")
-                    ? "err"
-                    : consultReply
-                      ? "ok"
-                      : agent === CONSULTATION_ID &&
-                          status.toLowerCase().includes("consult")
-                        ? "warn"
-                        : "info",
-            });
-          },
-          onComplete: (data) => {
-            if (shiftGen !== shiftGenRef.current) return;
-            if (flushRafRef.current != null) {
-              cancelAnimationFrame(flushRafRef.current);
-              flushRafRef.current = null;
-            }
-            flushRoomPatches();
-            setDecisions(data);
-            setRunState("complete");
-            setRooms((prev) => {
-              const out: Record<string, RoomState> = { ...prev };
-              for (const k of Object.keys(out)) {
-                const cur = out[k];
-                if (cur.message === "offline") continue;
-                if (cur.status === "WORKING" || cur.status === "STANDBY") {
-                  out[k] = { ...cur, status: "DONE", message: "complete" };
-                }
-              }
-              return out;
-            });
-            const paper = data.paper_trading;
-            const mail = data.memo_email;
-            let status = paper?.enabled
-              ? "shift complete. boss memo + Alpaca paper orders sent."
-              : paper?.skipped_reason
-                ? `shift complete. Alpaca skipped: ${paper.skipped_reason}`
-                : "shift complete. boss issued decisions.";
-            if (mail?.enabled) {
-              status = mail.sent
-                ? `${status} Memo emailed to ${mail.to}.`
-                : `${status} Memo email failed: ${mail.error ?? "unknown"}.`;
-            }
-            pushLog({
-              ts: Date.now(),
-              callsign: "SYS",
-              ticker: null,
-              status,
-              level:
-                (paper && !paper.enabled && paper.skipped_reason) ||
-                (mail?.enabled && !mail.sent)
-                  ? "warn"
-                  : "ok",
-            });
-          },
-          onError: (msg) => {
-            if (shiftGen !== shiftGenRef.current) return;
-            setErrorMsg(msg);
-            setRunState("error");
-            setRooms((prev) => {
-              const out: Record<string, RoomState> = { ...prev };
-              for (const k of Object.keys(out)) {
-                if (out[k].status === "WORKING" || out[k].analysis) {
-                  out[k] = {
-                    ...out[k],
-                    status: "ERROR",
-                    message: "shift aborted",
-                    analysis: null,
-                  };
-                }
-              }
-              return out;
-            });
-            pushLog({
-              ts: Date.now(),
-              callsign: "SYS",
-              ticker: null,
-              status: `error :: ${msg}`,
-              level: "err",
-            });
-          },
-        },
+        handlers,
       );
-      abortRef.current = abort;
+
+      runtime.session.abort = abort;
+      handleSessionChange(snapshotSession(runtime.session));
     },
-    [pushLog, scheduleRoomPatch, flushRoomPatches],
+    [makeStreamDeps, handleSessionChange],
   );
+
+  const canShelf =
+    runState === "running" && shelvedRuns.length < MAX_SHELVED_RUNS;
 
   return useMemo(
     () => ({
@@ -564,9 +520,15 @@ export function useFloor(): FloorController {
       shiftStartedAt,
       shiftRunId,
       resolvingTickers,
+      shelvedRuns,
+      canShelf,
       start,
       stop,
       reset,
+      shelfActiveRun,
+      restoreShelf,
+      discardShelf,
+      applyPaperTrading,
     }),
     [
       rooms,
@@ -578,32 +540,15 @@ export function useFloor(): FloorController {
       shiftStartedAt,
       shiftRunId,
       resolvingTickers,
+      shelvedRuns,
+      canShelf,
       start,
       stop,
       reset,
+      shelfActiveRun,
+      restoreShelf,
+      discardShelf,
+      applyPaperTrading,
     ],
   );
-}
-
-const ALL_AGENTS_BY_ID: Record<string, string> = (() => {
-  const map: Record<string, string> = {};
-  for (const a of ANALYSTS) map[roomIdFor(a.key)] = a.callsign;
-  map[PORTFOLIO_MANAGER_ID] = PORTFOLIO_MANAGER.callsign;
-  map[RISK_MANAGER_ID] = RISK_MANAGER.callsign;
-  map[DEBATE_ROOM_ID] = "DEBATE";
-  map["macro_feed"] = "MACRO";
-  map["system"] = "SYS";
-  map["paper_desk"] = "PAPER";
-  map["tier1_gate"] = "GATE";
-  map[CONSULTATION_ID] = "MAIL";
-  map[RISK_FORGE_ID] = "FORGE";
-  map[RISK_RESEARCH_HUB_ID] = "RSHUB";
-  map[SCENARIO_LAB_ID] = "SCNRO";
-  map[RISK_WATCHTOWER_ID] = "TOWER";
-  map["memo_desk"] = "MEMO";
-  return map;
-})();
-
-function callsignFor(agentId: string): string {
-  return ALL_AGENTS_BY_ID[agentId] ?? agentId.slice(0, 6).toUpperCase();
 }

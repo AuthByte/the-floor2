@@ -28,6 +28,11 @@ const PROFILES: Record<string, AgentProfile> = {
     tier: "data",
     investingStyle: "Press and headline sentiment as a trading signal overlay.",
   },
+  insider_activity_desk: {
+    tier: "data",
+    investingStyle:
+      "Monitors legal public SEC Form 4 filings and licensed feeds for cluster buying, officer patterns, and filing velocity — not MNPI or tips.",
+  },
   growth_analyst: {
     tier: "data",
     investingStyle: "Revenue/earnings growth trends, margins, and insider conviction.",

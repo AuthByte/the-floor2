@@ -10,12 +10,13 @@ import statistics
 from langchain_core.messages import HumanMessage
 from src.graph.state import AgentState, show_agent_reasoning
 from src.utils.progress import progress
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 from src.tools.api import (
     get_financial_metrics,
     get_insider_trades,
 )
 from src.utils.interactive_artifacts import build_growth_acceleration
+from src.utils.tier0_emit import attach_data_sources, begin_ticker_fetch
 
 def growth_analyst_agent(state: AgentState, agent_id: str = "growth_analyst_agent"):
     """Run growth analysis across tickers and write signals back to `state`."""
@@ -23,10 +24,11 @@ def growth_analyst_agent(state: AgentState, agent_id: str = "growth_analyst_agen
     data = state["data"]
     end_date = data["end_date"]
     tickers = data["tickers"]
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     growth_analysis: dict[str, dict] = {}
 
     for ticker in tickers:
+        begin_ticker_fetch()
         progress.update_status(agent_id, ticker, "Fetching financial data")
 
         # --- Historical financial metrics ---
@@ -35,7 +37,7 @@ def growth_analyst_agent(state: AgentState, agent_id: str = "growth_analyst_agen
             end_date=end_date,
             period="ttm",
             limit=12, # 3 years of ttm data
-            api_key=api_key,
+            api_key=api_keys,
         )
         if not financial_metrics:
             progress.update_status(agent_id, ticker, "Failed: No financial metrics found")
@@ -51,7 +53,7 @@ def growth_analyst_agent(state: AgentState, agent_id: str = "growth_analyst_agen
             ticker=ticker,
             end_date=end_date,
             limit=1000,
-            api_key=api_key
+            api_key=api_keys
         )
 
         # ------------------------------------------------------------------
@@ -127,7 +129,7 @@ def growth_analyst_agent(state: AgentState, agent_id: str = "growth_analyst_agen
             "reasoning": reasoning,
             "artifacts": artifacts,
         }
-        growth_analysis[ticker] = payload
+        growth_analysis[ticker] = attach_data_sources(payload)
         progress.update_status(agent_id, ticker, "Done", analysis=json.dumps(payload, indent=4))
 
     # ---- Emit message (for LLM tool chain) ----

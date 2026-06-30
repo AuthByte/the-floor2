@@ -45,9 +45,9 @@ export function WeatherReportPanel({ open, onClose, payload }: Props) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[52] flex items-end justify-center bg-ink-950/75 p-3 backdrop-blur-sm sm:items-center sm:p-6">
+    <div className="fixed inset-0 z-[52] flex animate-fade-in items-end justify-center bg-ink-950/75 p-3 backdrop-blur-sm sm:items-center sm:p-6">
       <div className="absolute inset-0" onClick={onClose} aria-hidden />
-      <div className="relative z-10 flex max-h-[88vh] w-full max-w-2xl animate-rise-in flex-col overflow-hidden rounded-xl border border-wire-800 bg-ink-950 shadow-float">
+      <div className="relative z-10 flex max-h-[88vh] w-full max-w-2xl animate-scale-in flex-col overflow-hidden rounded-xl border border-wire-800 bg-ink-950 shadow-float">
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-wire-800 px-4 py-3">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-brass">

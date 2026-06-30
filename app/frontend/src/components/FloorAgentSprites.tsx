@@ -6,7 +6,8 @@ import {
   debatePatrolWaypoints,
   homePatrolWaypoints,
 } from "../lib/debateWalkPaths";
-import { CANVAS_H, CANVAS_W, DEBATE_ROOM_ID } from "../lib/layout";
+import { DEBATE_ROOM_ID } from "../lib/layout";
+import { useFloorPlan } from "../lib/floorPlan/context";
 import { ROOM_ASSETS } from "../lib/roomAssets";
 import type { RoomState } from "../lib/types";
 import { CanvasWalkingSprite } from "./CanvasWalkingSprite";
@@ -20,6 +21,7 @@ export const FloorAgentSprites = memo(function FloorAgentSprites({
   rooms,
   enabledAgentKeys,
 }: Props) {
+  const { plan } = useFloorPlan();
   const debateState = rooms[DEBATE_ROOM_ID];
 
   const agents = useMemo(
@@ -30,7 +32,7 @@ export const FloorAgentSprites = memo(function FloorAgentSprites({
   return (
     <div
       className="pointer-events-none absolute left-0 top-0 z-[16]"
-      style={{ width: CANVAS_W, height: CANVAS_H }}
+      style={{ width: plan.canvasW, height: plan.canvasH }}
       aria-hidden
     >
       {agents.map((agent) => {

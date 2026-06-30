@@ -3,13 +3,14 @@ import math
 from langchain_core.messages import HumanMessage
 
 from src.graph.state import AgentState, show_agent_reasoning
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 import json
 import pandas as pd
 import numpy as np
 
 from src.tools.api import get_prices, prices_to_df
 from src.utils.progress import progress
+from src.utils.tier0_emit import attach_data_sources, begin_ticker_fetch
 
 
 def safe_float(value, default=0.0):
@@ -45,11 +46,12 @@ def technical_analyst_agent(state: AgentState, agent_id: str = "technical_analys
     start_date = data["start_date"]
     end_date = data["end_date"]
     tickers = data["tickers"]
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     # Initialize analysis for each ticker
     technical_analysis = {}
 
     for ticker in tickers:
+        begin_ticker_fetch()
         progress.update_status(agent_id, ticker, "Analyzing price data")
 
         # Get the historical price data
@@ -57,7 +59,7 @@ def technical_analyst_agent(state: AgentState, agent_id: str = "technical_analys
             ticker=ticker,
             start_date=start_date,
             end_date=end_date,
-            api_key=api_key,
+            api_key=api_keys,
         )
 
         if not prices:
@@ -104,7 +106,7 @@ def technical_analyst_agent(state: AgentState, agent_id: str = "technical_analys
         )
 
         # Generate detailed analysis report for this ticker
-        technical_analysis[ticker] = {
+        technical_analysis[ticker] = attach_data_sources({
             "signal": combined_signal["signal"],
             "confidence": round(combined_signal["confidence"] * 100),
             "reasoning": {
@@ -134,7 +136,7 @@ def technical_analyst_agent(state: AgentState, agent_id: str = "technical_analys
                     "metrics": normalize_pandas(stat_arb_signals["metrics"]),
                 },
             },
-        }
+        })
         try:
             from src.utils.agent_artifacts import attach_artifacts
 

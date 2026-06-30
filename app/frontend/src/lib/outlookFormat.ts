@@ -27,6 +27,7 @@ export interface ThesisOutlookFields {
   time_horizon_months?: number;
   price_target?: number;
   upside_pct?: number;
+  reference_price?: number;
 }
 
 export function parseOutlookFromAnalysis(
@@ -45,6 +46,9 @@ export function parseOutlookFromAnalysis(
     if (typeof parsed.upside_pct === "number") {
       out.upside_pct = parsed.upside_pct;
     }
+    if (typeof parsed.reference_price === "number") {
+      out.reference_price = parsed.reference_price;
+    }
     return out;
   } catch {
     return {};
@@ -55,6 +59,7 @@ export function outlookPlaqueLine(outlook: {
   timeHorizonMonths?: number;
   priceTarget?: number;
   upsidePct?: number;
+  referencePrice?: number;
 }): string | null {
   const horizon = formatHorizonMonths(outlook.timeHorizonMonths);
   const target = formatPriceTarget(outlook.priceTarget);

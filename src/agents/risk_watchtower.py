@@ -9,7 +9,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from src.graph.state import AgentState
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 from src.utils.progress import progress
 from src.utils.risk_pipeline import (
     RISK_WATCHTOWER_ID,
@@ -44,7 +44,7 @@ def risk_watchtower_node(state: AgentState) -> dict[str, Any]:
     tickers = data.get("tickers") or []
     end_date = data.get("end_date", "")
     start_date = data.get("start_date", end_date)
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     pipeline: dict[str, Any] = data.get("risk_pipeline") or {}
     baselines: dict[str, Any] = data.setdefault("risk_watchtower_baselines", {})
 
@@ -55,8 +55,8 @@ def risk_watchtower_node(state: AgentState) -> dict[str, Any]:
         research = bucket.get("research") or {}
         progress.update_status(RISK_WATCHTOWER_ID, key, "Scanning indicators")
 
-        news = get_company_news(key, end_date, limit=40, api_key=api_key)
-        prices = get_prices(key, start_date=start_date, end_date=end_date, api_key=api_key)
+        news = get_company_news(key, end_date, limit=40, api_key=api_keys)
+        prices = get_prices(key, start_date=start_date, end_date=end_date, api_key=api_keys)
         vol = 0.0
         if prices and len(prices) > 5:
             rets = []

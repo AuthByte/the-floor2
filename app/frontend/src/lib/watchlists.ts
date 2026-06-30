@@ -3,6 +3,7 @@ export interface WatchlistPreset {
   label: string;
   tickers: string;
   hint?: string;
+  autoPublish?: boolean;
 }
 
 export const WATCHLIST_PRESETS: WatchlistPreset[] = [
@@ -37,3 +38,10 @@ export const WATCHLIST_PRESETS: WatchlistPreset[] = [
     hint: "consumer",
   },
 ];
+
+const BUILTIN_IDS = new Set(WATCHLIST_PRESETS.map((p) => p.id));
+
+/** Built-in floor presets cannot enable auto-publish — duplicate to a member list first. */
+export function isBuiltinPreset(id: string): boolean {
+  return BUILTIN_IDS.has(id);
+}

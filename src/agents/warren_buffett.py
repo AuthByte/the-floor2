@@ -7,9 +7,9 @@ from typing_extensions import Literal
 from src.tools.api import get_financial_metrics, get_market_cap, get_prices, search_line_items
 from src.utils.llm import call_llm
 from src.utils.progress import progress
-from src.utils.thesis_outlook import ThesisOutlookFields, latest_close
-from src.utils.thesis_verdict import finish_from_signal
-from src.utils.api_key import get_api_key_from_state
+from src.utils.thesis_outlook import ThesisOutlookFields, OUTLOOK_JSON_SCHEMA, OUTLOOK_PROMPT_RULES, latest_close
+from src.utils.thesis_verdict import finish_from_signal, merge_finish_outlook
+from src.tools.providers.keys import keys_from_state
 
 
 class WarrenBuffettSignal(ThesisOutlookFields):
@@ -23,7 +23,7 @@ def warren_buffett_agent(state: AgentState, agent_id: str = "warren_buffett_agen
     data = state["data"]
     end_date = data["end_date"]
     tickers = data["tickers"]
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     # Collect all analysis for LLM reasoning
     analysis_data = {}
     buffett_analysis = {}
@@ -32,7 +32,7 @@ def warren_buffett_agent(state: AgentState, agent_id: str = "warren_buffett_agen
         current_price = None
         progress.update_status(agent_id, ticker, "Fetching financial metrics")
         # Fetch required data - request more periods for better trend analysis
-        metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=10, api_key=api_key)
+        metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=10, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Gathering financial line items")
         financial_line_items = search_line_items(
@@ -54,18 +54,18 @@ def warren_buffett_agent(state: AgentState, agent_id: str = "warren_buffett_agen
             end_date,
             period="ttm",
             limit=10,
-            api_key=api_key,
+            api_key=api_keys,
         )
 
         progress.update_status(agent_id, ticker, "Getting market cap")
         # Get current market cap
-        market_cap = get_market_cap(ticker, end_date, api_key=api_key)
+        market_cap = get_market_cap(ticker, end_date, api_key=api_keys)
 
         prices = get_prices(
             ticker,
             start_date=data["start_date"],
             end_date=end_date,
-            api_key=api_key,
+            api_key=api_keys,
         )
         current_price = latest_close(prices)
 
@@ -138,6 +138,7 @@ def warren_buffett_agent(state: AgentState, agent_id: str = "warren_buffett_agen
             analysis_data=analysis_data[ticker],
             state=state,
             agent_id=agent_id,
+            current_price=current_price,
         )
 
         # Store analysis in consistent format with other agents
@@ -178,7 +179,9 @@ def warren_buffett_agent(state: AgentState, agent_id: str = "warren_buffett_agen
             state,
             artifacts=artifacts,
             current_price=current_price,
+            analysis_data=analysis_data[ticker],
         )
+        merge_finish_outlook(buffett_analysis[ticker], state, agent_id, ticker)
 
     # Create the message
     message = HumanMessage(content=json.dumps(buffett_analysis), name=agent_id)
@@ -790,6 +793,7 @@ def generate_buffett_output(
         analysis_data: dict[str, any],
         state: AgentState,
         agent_id: str = "warren_buffett_agent",
+        current_price: float | None = None,
 ) -> WarrenBuffettSignal:
     """Get investment decision from LLM with a compact prompt."""
 
@@ -835,17 +839,20 @@ def generate_buffett_output(
                 "- 10-29%: Poor business or significantly overvalued\n"
                 "\n"
                 "Write a full investment memo style reasoning (around 180-320 words), including moat quality, valuation, and key downside risk. "
+                f"{OUTLOOK_PROMPT_RULES} "
                 "Do not invent data. Return JSON only."
             ),
             (
                 "human",
                 "Ticker: {ticker}\n"
+                "Latest close (USD): {current_price}\n"
                 "Facts:\n{facts}\n\n"
                 "Return exactly:\n"
                 "{{\n"
                 '  "signal": "bullish" | "bearish" | "neutral",\n'
                 '  "confidence": int,\n'
-                '  "reasoning": "detailed thesis with evidence and risks"\n'
+                '  "reasoning": "detailed thesis with evidence and risks",\n'
+                f"{OUTLOOK_JSON_SCHEMA}\n"
                 "}}"
             ),
         ]
@@ -854,6 +861,7 @@ def generate_buffett_output(
     prompt = template.invoke({
         "facts": json.dumps(facts, separators=(",", ":"), ensure_ascii=False),
         "ticker": ticker,
+        "current_price": current_price if current_price is not None else "unknown",
     })
 
     # Default fallback uses int confidence to match schema and avoid parse retries

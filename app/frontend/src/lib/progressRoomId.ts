@@ -5,7 +5,7 @@ import {
   RISK_PIPELINE_AGENTS,
   roomIdFor,
 } from "./agents";
-import { CONSULTATION_ID, DEBATE_ROOM_ID } from "./layout";
+import { CHAIR_PROPAGATION_ID, CONSULTATION_ID, DEBATE_ROOM_ID } from "./layout";
 
 const ROOM_ID_BY_KEY = new Map(ANALYSTS.map((a) => [a.key, roomIdFor(a.key)] as const));
 
@@ -20,6 +20,7 @@ const STATIC_ROOM_IDS = new Set<string>([
 
 /** Map backend progress agent ids onto floor room keys. */
 export function resolveProgressRoomId(agent: string): string {
+  if (agent === CHAIR_PROPAGATION_ID) return CONSULTATION_ID;
   if (STATIC_ROOM_IDS.has(agent)) return agent;
 
   const direct = ROOM_ID_BY_KEY.get(agent);

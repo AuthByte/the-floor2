@@ -100,6 +100,9 @@ def fetch_line_items(ticker: str, line_items: list[str], end_date: str, period: 
         "cash_and_equivalents": ("balance-sheet-statement", "cashAndCashEquivalents"),
         "free_cash_flow": ("cash-flow-statement", "freeCashFlow"),
         "operating_cash_flow": ("cash-flow-statement", "operatingCashFlow"),
+        "depreciation_and_amortization": ("cash-flow-statement", "depreciationAndAmortization"),
+        "capital_expenditure": ("cash-flow-statement", "capitalExpenditure"),
+        "ebit": ("income-statement", "ebit"),
     }
     needed = {name: fmp_map[name] for name in line_items if name in fmp_map}
     if not needed:

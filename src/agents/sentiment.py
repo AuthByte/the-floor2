@@ -4,10 +4,12 @@ from src.utils.progress import progress
 import pandas as pd
 import numpy as np
 import json
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 from src.tools.api import get_insider_trades, get_company_news, get_prices
+from src.tools.news_enrichment import infer_sentiment_from_title
 from src.utils.interactive_artifacts import build_sentiment_price_overlay
 from src.utils.thesis_outlook import latest_close
+from src.utils.tier0_emit import attach_data_sources, begin_ticker_fetch
 
 
 ##### Sentiment Agent #####
@@ -17,11 +19,12 @@ def sentiment_analyst_agent(state: AgentState, agent_id: str = "sentiment_analys
     end_date = data.get("end_date")
     start_date = data.get("start_date", end_date)
     tickers = data.get("tickers")
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     # Initialize sentiment analysis for each ticker
     sentiment_analysis = {}
 
     for ticker in tickers:
+        begin_ticker_fetch()
         progress.update_status(agent_id, ticker, "Fetching insider trades")
 
         # Get the insider trades
@@ -29,7 +32,7 @@ def sentiment_analyst_agent(state: AgentState, agent_id: str = "sentiment_analys
             ticker=ticker,
             end_date=end_date,
             limit=1000,
-            api_key=api_key,
+            api_key=api_keys,
         )
 
         progress.update_status(agent_id, ticker, "Analyzing trading patterns")
@@ -41,7 +44,12 @@ def sentiment_analyst_agent(state: AgentState, agent_id: str = "sentiment_analys
         progress.update_status(agent_id, ticker, "Fetching company news")
 
         # Get the company news
-        company_news = get_company_news(ticker, end_date, limit=100, api_key=api_key)
+        company_news = get_company_news(ticker, end_date, limit=250, api_key=api_keys)
+        for article in company_news:
+            if article.sentiment is None:
+                inferred = infer_sentiment_from_title(article.title)
+                if inferred:
+                    article.sentiment = inferred
 
         # Get the sentiment from the company news
         sentiment = pd.Series([n.sentiment for n in company_news]).dropna()
@@ -112,7 +120,7 @@ def sentiment_analyst_agent(state: AgentState, agent_id: str = "sentiment_analys
             }
         }
 
-        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_key)
+        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_keys)
         artifacts: list[dict] = []
         overlay = build_sentiment_price_overlay(ticker, news=company_news, prices=prices)
         if overlay:
@@ -124,7 +132,7 @@ def sentiment_analyst_agent(state: AgentState, agent_id: str = "sentiment_analys
             "reasoning": reasoning,
             "artifacts": artifacts,
         }
-        sentiment_analysis[ticker] = payload
+        sentiment_analysis[ticker] = attach_data_sources(payload)
 
         progress.update_status(agent_id, ticker, "Done", analysis=json.dumps(payload, indent=4))
 

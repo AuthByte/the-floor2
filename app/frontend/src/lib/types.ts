@@ -1,3 +1,6 @@
+import type { CommitteeOpinion, ThesisRevision } from "./opinions";
+import type { ShiftTokenUsage, TokenUsageStats } from "./tokenUsage";
+
 export type RoomStatus = "STANDBY" | "WORKING" | "DONE" | "ERROR";
 
 export interface RoomHistoryEntry {
@@ -15,6 +18,7 @@ export interface RoomVerdict {
   timeHorizonMonths?: number;
   priceTarget?: number;
   upsidePct?: number;
+  referencePrice?: number;
 }
 
 export interface RoomState {
@@ -44,6 +48,8 @@ export interface RoomState {
   /** Delegated sub-agent tasks (any parent desk). */
   subagents?: SubagentStatus[];
   subagentResults?: SubagentResult[];
+  /** Cumulative OpenRouter token usage for this agent this shift. */
+  tokenUsage?: TokenUsageStats | null;
 }
 
 export interface ConsultationMessage {
@@ -58,7 +64,7 @@ export interface ConsultationMessage {
   toKey: string;
   fromName: string;
   toName: string;
-  phase: "request" | "reply";
+  phase: "request" | "reply" | "user_request" | "user_reply";
   note?: string | null;
 }
 
@@ -69,7 +75,7 @@ export interface DebateLine {
   ts: number;
   side?: "left" | "right" | "support" | "panel" | "chair";
   signal?: "bullish" | "bearish" | "neutral" | string;
-  mode?: "opening" | "crossfire" | "one_v_two";
+  mode?: "opening" | "crossfire" | "one_v_two" | "chair_consult";
   matchup?: string | null;
   targets?: string[];
 }
@@ -94,6 +100,20 @@ export interface DebateSide {
   confidence_after: number;
 }
 
+export interface DebatePhaseMarker {
+  kind: "opening" | "floor_open" | "chair" | "crossfire" | "verdict";
+  started_at: number;
+  ended_at?: number;
+  label?: string;
+}
+
+export interface DebateChairInterjection {
+  chair_name: string;
+  text: string;
+  at: number;
+  replies: { agent_id: string; name: string; text: string; at: number }[];
+}
+
 export interface DebateRound {
   ticker: string;
   left: DebateSide;
@@ -110,6 +130,10 @@ export interface DebateRound {
   winner_name?: string | null;
   summary?: string | null;
   recap?: string | null;
+  started_at?: number;
+  ended_at?: number;
+  phases?: DebatePhaseMarker[];
+  chair_interjections?: DebateChairInterjection[];
 }
 
 export interface LogLine {
@@ -138,7 +162,17 @@ export interface PaperOrderResult {
   status: string;
   order_id?: string | null;
   filled_qty?: string | number | null;
+  filled_avg_price?: number | null;
+  ref_price?: number | null;
   error?: string | null;
+}
+
+export interface PaperTradingSummary {
+  orders_submitted: number;
+  orders_filled: number;
+  orders_failed: number;
+  day_pnl: number | null;
+  equity: number | null;
 }
 
 export interface PaperAccountSnapshot {
@@ -162,12 +196,33 @@ export interface PaperPosition {
   avg_entry_price?: number | null;
 }
 
+export interface PaperOrder {
+  id?: string;
+  symbol?: string;
+  side?: string;
+  qty?: string;
+  filled_qty?: string;
+  status?: string;
+  type?: string;
+  submitted_at?: string;
+  filled_at?: string | null;
+}
+
 export interface PaperTradingResult {
   enabled: boolean;
   skipped_reason?: string;
+  shift_id?: string;
+  executed_at?: string;
   orders: PaperOrderResult[];
   account: PaperAccountSnapshot | null;
   positions: PaperPosition[];
+  summary?: PaperTradingSummary;
+}
+
+export interface AlpacaStatus {
+  configured: boolean;
+  source: "env" | "request" | "none";
+  disabled?: boolean;
 }
 
 export interface MemoEmailResult {
@@ -298,6 +353,71 @@ export interface ShiftArtifact {
   graph?: Record<string, unknown>;
 }
 
+/** Chair consult rollup — populated when consultation-action-loop ships. */
+export interface ChairImpactBlock {
+  consultCount?: number;
+  materialCount?: number;
+  consultedAgents: string[];
+  revisions: Array<{
+    agentKey: string;
+    agentName: string;
+    prompt: string;
+    before: ThesisRevision["before"];
+    after: ThesisRevision["after"];
+    replyToUser?: string;
+  }>;
+  pmDecisionDelta?: Array<{
+    ticker: string;
+    before: string;
+    after: string;
+  }>;
+}
+
+export interface MemoPosition {
+  ticker: string;
+  action: FinalDecisionAction;
+  opinions: CommitteeOpinion[];
+  tally: { bullish: number; bearish: number; neutral: number };
+  dossier?: TickerDossier | null;
+  risk?: TickerRiskPipeline | null;
+  artifacts?: ShiftArtifact[];
+}
+
+/** Canonical memo artifact — single source for UI, email, and exports. */
+export interface MemoDocument {
+  version: 1;
+  runId: string;
+  shiftId?: string | null;
+  publishedPostId?: string | null;
+  stampUtc: string;
+  tickers: string[];
+  positions: MemoPosition[];
+  paperTrading?: PaperTradingResult | null;
+  chairImpact?: ChairImpactBlock | null;
+  footerNote: "ALPACA PAPER" | "PAPER ONLY";
+}
+
+export interface ChairImpactDecisionRevision {
+  before: FinalDecisionAction;
+  after: FinalDecisionAction;
+  changed: boolean;
+  reason?: string;
+}
+
+export interface ChairImpact {
+  consult_count: number;
+  material_count: number;
+  revisions: import("./opinions").ThesisRevision[];
+  debate_adjustments: {
+    ticker: string;
+    cohort_changes: { agent: string; from_cohort: string; to_cohort: string }[];
+    confidence_deltas: { agent: string; before: number; after: number }[];
+    synthetic_lines_added?: number;
+  }[];
+  decisions: Record<string, ChairImpactDecisionRevision>;
+  propagation_errors?: string[];
+}
+
 export interface CompletePayload {
   decisions: Record<string, FinalDecisionAction> | null;
   analyst_signals: Record<string, Record<string, unknown>>;
@@ -306,8 +426,12 @@ export interface CompletePayload {
   risk_pipeline?: Record<string, TickerRiskPipeline>;
   paper_trading?: PaperTradingResult;
   memo_email?: MemoEmailResult;
+  memo_document?: MemoDocument;
   shift_artifacts?: Record<string, ShiftArtifact[]>;
   weather_reports?: Record<string, import("./weatherReport").WeatherReport>;
+  debate_rounds?: DebateRound[];
+  chair_impact?: ChairImpact;
+  token_usage?: ShiftTokenUsage;
 }
 
 export type RunState = "idle" | "running" | "complete" | "error";
@@ -339,6 +463,19 @@ export interface HedgeFundRequest {
   run_risk_pipeline?: boolean;
   send_memo_email?: boolean;
   digest_email?: string;
+  api_keys?: Record<string, string>;
+}
+
+export interface BacktestRequest {
+  tickers: string[];
+  graph_nodes: GraphNode[];
+  graph_edges: GraphEdge[];
+  model_name: string;
+  model_provider: string;
+  initial_capital: number;
+  margin_requirement?: number;
+  start_date: string;
+  end_date: string;
   api_keys?: Record<string, string>;
 }
 

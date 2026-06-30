@@ -17,7 +17,7 @@ from src.agents._legendary_investor_utils import (
 )
 from src.graph.state import AgentState, show_agent_reasoning
 from src.tools.api import get_company_news, get_financial_metrics, get_market_cap, get_prices, search_line_items
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 from src.utils.llm import call_llm
 from src.utils.progress import progress
 from src.utils.supply_chain_graph import (
@@ -26,7 +26,7 @@ from src.utils.supply_chain_graph import (
     graph_to_artifact,
 )
 from src.utils.thesis_outlook import ThesisOutlookFields, latest_close
-from src.utils.thesis_verdict import finish_from_signal
+from src.utils.thesis_verdict import finish_from_signal, merge_finish_outlook
 from src.utils.tier1_fetch import tier0_briefings_ready
 
 
@@ -42,20 +42,20 @@ def supply_chain_cartographer_agent(state: AgentState, agent_id: str = "supply_c
     tickers = data["tickers"]
     start_date = data["start_date"]
     end_date = data["end_date"]
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     signals: dict[str, Any] = {}
 
     for ticker in tickers:
         progress.update_status(agent_id, ticker, "Mapping supply network")
-        metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=6, api_key=api_key)
-        line_items = search_line_items(ticker, LINE_ITEMS, end_date, period="ttm", limit=6, api_key=api_key)
-        market_cap = get_market_cap(ticker, end_date, api_key=api_key)
-        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_key)
+        metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=6, api_key=api_keys)
+        line_items = search_line_items(ticker, LINE_ITEMS, end_date, period="ttm", limit=6, api_key=api_keys)
+        market_cap = get_market_cap(ticker, end_date, api_key=api_keys)
+        prices = get_prices(ticker, start_date=start_date, end_date=end_date, api_key=api_keys)
         current_price = latest_close(prices)
         if tier0_briefings_ready(state):
-            news = get_company_news(ticker, end_date, limit=25, api_key=api_key)
+            news = get_company_news(ticker, end_date, limit=25, api_key=api_keys)
         else:
-            news = get_company_news(ticker, end_date, limit=40, api_key=api_key)
+            news = get_company_news(ticker, end_date, limit=40, api_key=api_keys)
 
         chart_ctx = {
             "ticker": ticker,
@@ -125,6 +125,7 @@ def supply_chain_cartographer_agent(state: AgentState, agent_id: str = "supply_c
             "thesis_summary": summary,
             "artifacts": artifacts,
         }
+        merge_finish_outlook(signals[ticker], state, agent_id, ticker, thesis_summary=summary)
 
     message = HumanMessage(content=json.dumps(signals), name=agent_id)
     if state["metadata"].get("show_reasoning"):

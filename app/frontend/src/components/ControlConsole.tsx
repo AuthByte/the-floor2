@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { OPENROUTER_MODELS } from "../lib/models";
 import type { RunState } from "../lib/types";
 import { parseWatchlistInput } from "../lib/tickerInput";
-import { WATCHLIST_PRESETS, type WatchlistPreset } from "../lib/watchlists";
+import { WATCHLIST_PRESETS, isBuiltinPreset, type WatchlistPreset } from "../lib/watchlists";
 
 interface Props {
   tickers: string;
@@ -13,39 +13,20 @@ interface Props {
   initialCash: number;
   onCashChange: (v: number) => void;
   openrouterKey: string;
-  onKeyChange: (v: string) => void;
-  alpacaPaper: boolean;
-  onAlpacaPaperChange: (v: boolean) => void;
-  runRiskPipeline: boolean;
-  onRunRiskPipelineChange: (v: boolean) => void;
-  alpacaKeyId: string;
-  onAlpacaKeyIdChange: (v: string) => void;
-  alpacaSecret: string;
-  onAlpacaSecretChange: (v: string) => void;
-  memoEmail: boolean;
-  onMemoEmailChange: (v: boolean) => void;
-  digestEmail: string;
-  onDigestEmailChange: (v: string) => void;
-  resendApiKey: string;
-  onResendApiKeyChange: (v: string) => void;
   runState: RunState;
   errorMsg: string | null;
   resolvingTickers?: boolean;
   onStart: () => void;
   onStop: () => void;
   onReset: () => void;
+  onShelf?: () => void;
+  canShelf?: boolean;
   enabledAnalystCount: number;
+  onOpenSettings?: () => void;
+  onManageWatchlists?: () => void;
 }
 
 export function ControlConsole(p: Props) {
-  const [showKey, setShowKey] = useState(false);
-  const [keysShelved, setKeysShelved] = useState(() => {
-    try {
-      return localStorage.getItem("hf-keys-shelved") !== "false";
-    } catch {
-      return true;
-    }
-  });
   const tickerRef = useRef<HTMLInputElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
 
@@ -58,14 +39,6 @@ export function ControlConsole(p: Props) {
     window.addEventListener("mousedown", onDoc);
     return () => window.removeEventListener("mousedown", onDoc);
   }, [menuOpen]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem("hf-keys-shelved", keysShelved ? "true" : "false");
-    } catch {
-      /* ignore */
-    }
-  }, [keysShelved]);
 
   const isRunning = p.runState === "running";
   const isResolving = Boolean(p.resolvingTickers);
@@ -80,7 +53,7 @@ export function ControlConsole(p: Props) {
     if (canStart || isRunning || isResolving) return [];
     const blockers: string[] = [];
     if (!p.tickers.trim()) blockers.push("Enter tickers or describe a watchlist");
-    if (!p.openrouterKey.trim()) blockers.push("Add OpenRouter key (unshelve keys below)");
+    if (!p.openrouterKey.trim()) blockers.push("Add OpenRouter key in account settings");
     if (p.enabledAnalystCount === 0) blockers.push("Enable analysts in Manage Roster");
     return blockers;
   }, [canStart, isRunning, isResolving, p.tickers, p.openrouterKey, p.enabledAnalystCount]);
@@ -94,7 +67,10 @@ export function ControlConsole(p: Props) {
     OPENROUTER_MODELS.find((m) => m.id === p.model)?.label ?? p.model;
 
   return (
-    <section className="relative z-10 border-b border-wire-800/80 bg-ink-900/80 backdrop-blur-md">
+    <section
+      data-tour="control-console"
+      className="desk-control-console relative z-10 border-b border-wire-800/80 bg-ink-900/80 backdrop-blur-md"
+    >
       <div className="mx-auto grid max-w-[1700px] grid-cols-1 gap-x-6 gap-y-3 px-5 py-3.5 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1fr)_auto] lg:items-end">
         <TickerField
           tickers={p.tickers}
@@ -102,6 +78,7 @@ export function ControlConsole(p: Props) {
           disabled={isRunning}
           tickerRef={tickerRef}
           watchlistPresets={watchlistPresets}
+          onManageWatchlists={p.onManageWatchlists}
         />
 
         <Field label="model" hint="openrouter">
@@ -163,212 +140,91 @@ export function ControlConsole(p: Props) {
           </div>
         </Field>
 
-        <div className="flex flex-col items-end justify-end gap-2">
+        <div className="flex flex-col items-end justify-end gap-2 pb-2">
           {startBlockers.length > 0 ? (
             <ul className="max-w-[220px] text-right text-[9px] leading-relaxed text-wire-600">
               {startBlockers.map((b) => (
-                <li key={b}>{b}</li>
+                <li key={b}>
+                  {b.includes("account settings") && p.onOpenSettings ? (
+                    <button
+                      type="button"
+                      onClick={p.onOpenSettings}
+                      className="text-brass/90 underline decoration-brass/30 underline-offset-2 transition hover:text-brass"
+                    >
+                      {b}
+                    </button>
+                  ) : (
+                    b
+                  )}
+                </li>
               ))}
             </ul>
           ) : null}
           <div className="flex items-end gap-2">
-          {p.runState === "complete" || p.runState === "error" ? (
-            <button
-              type="button"
-              onClick={p.onReset}
-              className="rounded-md border border-wire-700 px-3.5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-wire-300 transition hover:border-wire-500 hover:text-wire-100 active:translate-y-px"
-            >
-              reset
-            </button>
-          ) : null}
-          {isRunning ? (
-            <button
-              type="button"
-              onClick={p.onStop}
-              className="group flex items-center gap-2 rounded-md border border-siren/70 bg-siren/10 px-5 py-2.5 text-[11px] font-bold uppercase tracking-[0.28em] text-siren shadow-siren transition hover:bg-siren hover:text-ink-950 active:translate-y-px"
-            >
-              <span className="h-2 w-2 rounded-[1px] bg-siren group-hover:bg-ink-950" />
-              kill shift
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={p.onStart}
-              disabled={!canStart}
-              className={`group relative flex items-center gap-2 overflow-hidden rounded-md border px-5 py-2.5 text-[11px] font-bold uppercase tracking-[0.28em] transition active:translate-y-px ${
-                canStart
-                  ? "border-brass/70 bg-brass/15 text-brass shadow-brass hover:bg-brass hover:text-ink-950"
-                  : "cursor-not-allowed border-wire-800 text-wire-700"
-              }`}
-            >
-              {canStart ? (
-                <span className="pointer-events-none absolute inset-y-0 -left-1/2 w-1/3 -skew-x-12 bg-white/15 animate-sheen" />
-              ) : null}
-              <span
-                className={`h-2 w-2 rounded-[1px] ${canStart ? "bg-brass group-hover:bg-ink-950" : "bg-wire-800"}`}
-              />
-              {isResolving ? "resolving…" : "start shift"}
-            </button>
-          )}
-          </div>
-        </div>
-      </div>
-
-      <div className="border-t border-wire-800/80 px-5 py-2">
-        <button
-          type="button"
-          onClick={() => setKeysShelved((v) => !v)}
-          className="flex w-full items-center justify-between gap-3 rounded-md border border-wire-800/90 bg-ink-950/40 px-3 py-2 text-left transition hover:border-brass/40"
-        >
-          <span className="text-[10px] font-semibold uppercase tracking-[0.28em] text-wire-400">
-            {keysShelved ? "Keys shelved" : "Keys & integrations"}
-          </span>
-          <span className="text-[9px] uppercase tracking-[0.2em] text-wire-600">
-            {keysShelved ? "show openrouter · alpaca · resend" : "hide"}
-          </span>
-        </button>
-      </div>
-
-      {!keysShelved ? (
-        <div className="border-t border-wire-800/80 px-5 py-3">
-          <div className="grid gap-3 lg:grid-cols-2">
-            <Field
-              label="openrouter key"
-              hint={
+            {p.runState === "complete" || p.runState === "error" ? (
+              <button
+                type="button"
+                onClick={p.onReset}
+                className="rounded-md border border-wire-700 px-3.5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.28em] text-wire-300 transition hover:border-wire-500 hover:text-wire-100 active:translate-y-px"
+              >
+                reset
+              </button>
+            ) : null}
+            {isRunning ? (
+              <>
+                {p.onShelf ? (
+                  <button
+                    type="button"
+                    onClick={p.onShelf}
+                    disabled={!p.canShelf}
+                    title={
+                      p.canShelf
+                        ? "Park this shift on the shelf and start another"
+                        : "Shelf full — discard a shelved shift first"
+                    }
+                    className={`rounded-md border px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.28em] transition active:translate-y-px ${
+                      p.canShelf
+                        ? "border-brass/50 bg-brass/10 text-brass hover:bg-brass/20"
+                        : "cursor-not-allowed border-wire-800 text-wire-700"
+                    }`}
+                  >
+                    shelf
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  onClick={() => setShowKey((v) => !v)}
-                  className="text-[10px] uppercase tracking-[0.2em] text-wire-500 transition hover:text-brass"
+                  onClick={p.onStop}
+                  className="group flex animate-scale-in items-center gap-2 rounded-md border border-siren/70 bg-siren/10 px-5 py-2.5 text-[11px] font-bold uppercase tracking-[0.28em] text-siren shadow-siren transition hover:bg-siren hover:text-ink-950 active:translate-y-px"
                 >
-                  {showKey ? "hide" : "reveal"}
+                  <span className="h-2 w-2 animate-pulse-dot rounded-[1px] bg-siren group-hover:bg-ink-950" />
+                  kill shift
                 </button>
-              }
-            >
-              <input
-                value={p.openrouterKey}
-                onChange={(e) => p.onKeyChange(e.target.value)}
-                type={showKey ? "text" : "password"}
-                placeholder="sk-or-v1-…"
-                spellCheck={false}
-                autoCorrect="off"
-                className="w-full bg-transparent font-mono text-sm text-wire-100 placeholder-wire-700 outline-none"
-              />
-            </Field>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={p.onStart}
+                disabled={!canStart}
+                className={`group relative flex items-center gap-2 overflow-hidden rounded-md border px-5 py-2.5 text-[11px] font-bold uppercase tracking-[0.28em] transition active:translate-y-px ${
+                  canStart
+                    ? "border-brass/70 bg-brass/15 text-brass shadow-brass hover:bg-brass hover:text-ink-950"
+                    : "cursor-not-allowed border-wire-800 text-wire-700"
+                }`}
+              >
+                {canStart ? (
+                  <span className="pointer-events-none absolute inset-y-0 -left-1/2 w-1/3 -skew-x-12 bg-white/15 animate-sheen" />
+                ) : null}
+                <span
+                  className={`h-2 w-2 rounded-[1px] ${canStart ? "bg-brass group-hover:bg-ink-950" : "bg-wire-800"}`}
+                />
+                {isResolving ? "resolving…" : "start shift"}
+              </button>
+            )}
           </div>
         </div>
-      ) : null}
-
-      <div className="border-t border-wire-800/80 px-5 py-3">
-        <label className="flex cursor-pointer items-center gap-3">
-          <input
-            type="checkbox"
-            checked={p.alpacaPaper}
-            onChange={(e) => p.onAlpacaPaperChange(e.target.checked)}
-            disabled={isRunning}
-            className="h-3.5 w-3.5 rounded border-wire-600 bg-ink-950 text-brass accent-brass"
-          />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.28em] text-wire-300">
-            Alpaca paper
-          </span>
-          <span className="text-[9px] uppercase tracking-[0.18em] text-wire-600">
-            submit boss orders after shift
-          </span>
-        </label>
-        <label className="mt-3 flex cursor-pointer items-center gap-3">
-          <input
-            type="checkbox"
-            checked={p.runRiskPipeline}
-            onChange={(e) => p.onRunRiskPipelineChange(e.target.checked)}
-            disabled={isRunning}
-            className="h-3.5 w-3.5 rounded border-wire-600 bg-ink-950 text-brass accent-brass"
-          />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.28em] text-wire-300">
-            Risk pipeline
-          </span>
-          <span className="text-[9px] uppercase tracking-[0.18em] text-wire-600">
-            forge → research → scenarios → watchtower
-          </span>
-        </label>
-        {p.alpacaPaper && !keysShelved ? (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <Field label="alpaca key id" hint="or .env">
-              <input
-                value={p.alpacaKeyId}
-                onChange={(e) => p.onAlpacaKeyIdChange(e.target.value)}
-                type="password"
-                placeholder="PK…"
-                spellCheck={false}
-                disabled={isRunning}
-                className="w-full bg-transparent font-mono text-sm text-wire-100 placeholder-wire-700 outline-none disabled:opacity-50"
-              />
-            </Field>
-            <Field label="alpaca secret" hint="paper only">
-              <input
-                value={p.alpacaSecret}
-                onChange={(e) => p.onAlpacaSecretChange(e.target.value)}
-                type="password"
-                placeholder="••••"
-                spellCheck={false}
-                disabled={isRunning}
-                className="w-full bg-transparent font-mono text-sm text-wire-100 placeholder-wire-700 outline-none disabled:opacity-50"
-              />
-            </Field>
-          </div>
-        ) : null}
       </div>
-
-      <div className="border-t border-wire-800/80 px-5 py-3">
-        <label className="flex cursor-pointer items-center gap-3">
-          <input
-            type="checkbox"
-            checked={p.memoEmail}
-            onChange={(e) => p.onMemoEmailChange(e.target.checked)}
-            disabled={isRunning}
-            className="h-3.5 w-3.5 rounded border-wire-600 bg-ink-950 text-brass accent-brass"
-          />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.28em] text-wire-300">
-            Email boss memo
-          </span>
-          <span className="text-[9px] uppercase tracking-[0.18em] text-wire-600">
-            Resend digest when shift completes
-          </span>
-        </label>
-        {p.memoEmail && !keysShelved ? (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <Field label="your email" hint="must match Resend account in test mode">
-              <input
-                value={p.digestEmail}
-                onChange={(e) => p.onDigestEmailChange(e.target.value)}
-                type="email"
-                placeholder="you@example.com"
-                spellCheck={false}
-                disabled={isRunning}
-                className="w-full bg-transparent font-mono text-sm text-wire-100 placeholder-wire-700 outline-none disabled:opacity-50"
-              />
-            </Field>
-            <p className="sm:col-span-2 text-[10px] leading-relaxed text-wire-600">
-              Uses Resend. With the default test sender{" "}
-              <span className="font-mono text-wire-500">onboarding@resend.dev</span>, mail
-              only delivers to the email you signed up with on Resend — not arbitrary
-              addresses. Verify a domain to send anywhere.
-            </p>
-            <Field label="resend api key" hint="or .env">
-              <input
-                value={p.resendApiKey}
-                onChange={(e) => p.onResendApiKeyChange(e.target.value)}
-                type="password"
-                placeholder="re_…"
-                spellCheck={false}
-                disabled={isRunning}
-                className="w-full bg-transparent font-mono text-sm text-wire-100 placeholder-wire-700 outline-none disabled:opacity-50"
-              />
-            </Field>
-          </div>
-        ) : null}
-      </div>
-
       {p.errorMsg ? (
-        <div className="flex items-center gap-2 border-t border-siren/30 bg-siren/[0.06] px-5 py-2 text-[11px] uppercase tracking-[0.2em] text-siren">
+        <div className="flex animate-wire-in items-center gap-2 border-t border-siren/30 bg-siren/[0.06] px-5 py-2 text-[11px] uppercase tracking-[0.2em] text-siren">
           <span className="text-siren siren-glow">▲</span> fault
           <span className="text-siren/60">//</span>
           <span className="normal-case tracking-normal text-siren/90">
@@ -386,12 +242,14 @@ function TickerField({
   disabled,
   tickerRef,
   watchlistPresets,
+  onManageWatchlists,
 }: {
   tickers: string;
   onTickersChange: (v: string) => void;
   disabled: boolean;
   tickerRef: React.RefObject<HTMLInputElement>;
   watchlistPresets: WatchlistPreset[];
+  onManageWatchlists?: () => void;
 }) {
   const mode = useMemo(() => parseWatchlistInput(tickers), [tickers]);
   const modeHint =
@@ -407,13 +265,24 @@ function TickerField({
         <span className="text-[9px] font-medium uppercase tracking-[0.34em] text-wire-500 transition-colors group-focus-within:text-brass/80">
           watchlist
         </span>
-        <span
-          className={`text-[9px] uppercase tracking-[0.22em] transition-colors ${
-            mode.kind === "direct" ? "text-phos/90" : "text-wire-600"
-          }`}
-        >
-          {modeHint}
-        </span>
+        <div className="flex items-center gap-2">
+          {onManageWatchlists ? (
+            <button
+              type="button"
+              onClick={onManageWatchlists}
+              className="text-[9px] uppercase tracking-[0.18em] text-brass/80 underline decoration-brass/30 underline-offset-2 transition hover:text-brass"
+            >
+              Manage
+            </button>
+          ) : null}
+          <span
+            className={`text-[9px] uppercase tracking-[0.22em] transition-colors ${
+              mode.kind === "direct" ? "text-phos/90" : "text-wire-600"
+            }`}
+          >
+            {modeHint}
+          </span>
+        </div>
       </div>
       <div className="flex items-center gap-2 border-b border-wire-800 pb-2 transition-colors focus-within:border-brass">
         <span className="text-brass/80">&rsaquo;</span>
@@ -438,8 +307,14 @@ function TickerField({
               type="button"
               onClick={() => onTickersChange(preset.tickers)}
               title={preset.hint}
-              className="rounded border border-wire-800 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-wire-500 transition hover:border-brass/50 hover:text-brass active:translate-y-px"
+              className="relative rounded border border-wire-800 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-wire-500 transition hover:border-brass/50 hover:text-brass active:translate-y-px"
             >
+              {preset.autoPublish && !isBuiltinPreset(preset.id) ? (
+                <span
+                  className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-phos"
+                  aria-hidden
+                />
+              ) : null}
               {preset.label}
             </button>
           ))}

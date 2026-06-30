@@ -1,4 +1,4 @@
-import { ANALYSTS, DATA_ANALYSTS, NAMED_ANALYSTS, SPECIALIST_ANALYSTS } from "./agents";
+import { ANALYSTS, DATA_ANALYSTS, NAMED_ANALYSTS, SPECIALIST_ANALYSTS, QUANT_ANALYSTS } from "./agents";
 import {
   collectCommitteeOpinions,
   isMemoInvestor,
@@ -14,7 +14,7 @@ export interface ShadowAgentRow {
   key: string;
   name: string;
   callsign: string;
-  tier: "data" | "legend" | "specialist";
+  tier: "data" | "legend" | "specialist" | "quant";
   enabled: boolean;
   signal: string;
   confidence: number | null;
@@ -62,6 +62,7 @@ const GROWTH_KEYS = new Set([
 const DATA_KEYS = new Set(DATA_ANALYSTS.map((a) => a.key));
 const LEGEND_KEYS = new Set(NAMED_ANALYSTS.map((a) => a.key));
 const SPECIALIST_KEYS = new Set(SPECIALIST_ANALYSTS.map((a) => a.key));
+const QUANT_KEYS = new Set(QUANT_ANALYSTS.map((a) => a.key));
 
 export const SHADOW_PRESETS: ShadowPreset[] = [
   { id: "all", label: "Full committee", description: "Every voice that spoke on this ticker" },
@@ -85,6 +86,7 @@ function stripAgentSuffix(agentId: string): string {
 function tierFor(key: string): ShadowAgentRow["tier"] {
   if (DATA_KEYS.has(key)) return "data";
   if (SPECIALIST_KEYS.has(key)) return "specialist";
+  if (QUANT_KEYS.has(key)) return "quant";
   return "legend";
 }
 
@@ -122,7 +124,7 @@ export function listShadowAgents(
   }
 
   return rows.sort((a, b) => {
-    const tierOrder = { legend: 0, specialist: 1, data: 2 };
+    const tierOrder = { legend: 0, specialist: 1, quant: 2, data: 3 };
     const d = tierOrder[a.tier] - tierOrder[b.tier];
     if (d !== 0) return d;
     return a.name.localeCompare(b.name);

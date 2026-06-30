@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NAMED_ANALYSTS } from "../lib/agents";
 import { postDebateInterjection } from "../lib/api";
+import { buildChairTimelineSegments } from "../lib/debateReplay";
+import { useDebateReplayPlayback } from "../hooks/useDebateReplayPlayback";
 import { ROOM_ASSETS } from "../lib/roomAssets";
-import type { DebateCohorts, DebateLine, DebateMatchup, DebateRound, DebateSide, RoomState, RunState } from "../lib/types";
+import type { DebateLine, DebateMatchup, DebateRound, DebateSide, RoomState, RunState } from "../lib/types";
+import { DebateChairTimeline } from "./DebateChairTimeline";
+import { DebateReplayTransport } from "./DebateReplayTransport";
 import { InvestorAvatar } from "./InvestorAvatar";
 
 type AppTheme = "light" | "dark";
+export type DebateTheaterMode = "live" | "replay";
+
+const TRANSCRIPT_WINDOW = 72;
 
 interface Props {
   state: RoomState;
@@ -15,6 +22,9 @@ interface Props {
   runState?: RunState;
   shiftRunId?: string | null;
   chairName?: string;
+  mode?: DebateTheaterMode;
+  replayRounds?: DebateRound[] | null;
+  synthesized?: boolean;
 }
 
 interface TheaterPalette {
@@ -34,7 +44,7 @@ interface TheaterPalette {
 function theaterPalette(theme: AppTheme): TheaterPalette {
   if (theme === "light") {
     return {
-      panelBg: "rgba(252,250,245,0.96)",
+      panelBg: "rgba(252,250,245,0.98)",
       panelBorder: "rgba(180,170,150,0.55)",
       text: "#1a1814",
       mute: "#5c574d",
@@ -43,30 +53,24 @@ function theaterPalette(theme: AppTheme): TheaterPalette {
       bull: "#1a7a52",
       bear: "#c44a32",
       hair: "rgba(26,24,20,0.12)",
-      glassBg: "rgba(255,255,255,0.88)",
-      glassBorder: "rgba(154,107,26,0.35)",
+      glassBg: "rgba(255,255,255,0.92)",
+      glassBorder: "rgba(154,107,26,0.28)",
     };
   }
   return {
-    panelBg: "rgba(18,16,9,0.96)",
-    panelBorder: "rgba(227,178,75,0.38)",
+    panelBg: "rgba(14,13,10,0.98)",
+    panelBorder: "rgba(227,178,75,0.32)",
     text: "#f2efe7",
     mute: "#b8b4a8",
     faint: "#8f8b80",
     brass: "#e3b24b",
     bull: "#2fd08a",
     bear: "#ff7a5c",
-    hair: "rgba(242,239,231,0.11)",
-    glassBg: "rgba(24,22,16,0.92)",
-    glassBorder: "rgba(227,178,75,0.28)",
+    hair: "rgba(242,239,231,0.1)",
+    glassBg: "rgba(22,20,15,0.94)",
+    glassBorder: "rgba(227,178,75,0.22)",
   };
 }
-
-/**
- * Full-bleed Argument Room theater — fills the floor column.
- * Principal debaters get scoreboard chips; joiners sit in a compact row.
- * Only the active speaker gets a pop animation when they take the floor.
- */
 
 export function DebateTheater({
   state,
@@ -76,26 +80,33 @@ export function DebateTheater({
   runState = "idle",
   shiftRunId = null,
   chairName = "Chair",
+  mode = "live",
+  replayRounds = null,
+  synthesized = false,
 }: Props) {
   const pal = theaterPalette(theme);
-  const ROOM_HAIR = pal.hair;
-  const ROOM_MUTE = pal.mute;
-  const ROOM_FAINT = pal.faint;
-  const ROOM_BRASS = pal.brass;
-  const ROOM_BULL = pal.bull;
-  const ROOM_BEAR = pal.bear;
-  const [popSpeaker, setPopSpeaker] = useState<string | null>(null);
-  const rounds = useMemo(() => state.debateRounds ?? [], [state.debateRounds]);
+  const isReplay = mode === "replay";
+  const [autoFollow, setAutoFollow] = useState(true);
+  const [pinRound, setPinRound] = useState(false);
+  const [showRoster, setShowRoster] = useState(false);
+
+  const rounds = useMemo(
+    () => (isReplay && replayRounds?.length ? replayRounds : state.debateRounds ?? []),
+    [isReplay, replayRounds, state.debateRounds],
+  );
+
   const transcriptRef = useRef<HTMLDivElement>(null);
   const activeRoundIdx = useMemo(() => {
     if (rounds.length === 0) return -1;
+    if (isReplay) return rounds.length - 1;
     const t = state.activeDebateTicker;
     if (!t) return rounds.length - 1;
     for (let i = rounds.length - 1; i >= 0; i--) {
       if (rounds[i]!.ticker === t) return i;
     }
     return rounds.length - 1;
-  }, [rounds, state.activeDebateTicker]);
+  }, [rounds, state.activeDebateTicker, isReplay]);
+
   const [selectedRoundIdx, setSelectedRoundIdx] = useState<number>(-1);
 
   const nameToAgent = useMemo(() => {
@@ -111,31 +122,44 @@ export function DebateTheater({
       return;
     }
     setSelectedRoundIdx((prev) => {
+      if (isReplay) return prev < 0 || prev >= rounds.length ? 0 : prev;
+      if (pinRound && prev >= 0 && prev < rounds.length) return prev;
       if (prev < 0 || prev >= rounds.length) return activeRoundIdx;
       return prev;
     });
-  }, [open, rounds.length, activeRoundIdx]);
+  }, [open, rounds.length, activeRoundIdx, isReplay, pinRound]);
 
   const round =
-    selectedRoundIdx >= 0 && selectedRoundIdx < rounds.length
-      ? rounds[selectedRoundIdx]!
-      : null;
-  const feed = useMemo(
+    selectedRoundIdx >= 0 && selectedRoundIdx < rounds.length ? rounds[selectedRoundIdx]! : null;
+
+  const replayPlayback = useDebateReplayPlayback({
+    open: open && isReplay,
+    round,
+    synthesized,
+  });
+
+  const liveFeed = useMemo(
     () => round?.lines ?? state.debateFeed ?? [],
     [round?.lines, state.debateFeed],
   );
 
-  const activeSpeaker = useMemo(() => {
-    const last = feed[feed.length - 1];
-    return last?.name ?? null;
-  }, [feed]);
+  const feed = useMemo(() => {
+    if (!isReplay) return liveFeed;
+    const model = replayPlayback.model;
+    if (!model?.lines.length) return [];
+    const end = Math.min(replayPlayback.lineIndex + 1, model.lines.length);
+    return model.lines.slice(0, end);
+  }, [isReplay, liveFeed, replayPlayback.model, replayPlayback.lineIndex]);
 
-  useEffect(() => {
-    if (!activeSpeaker) return;
-    setPopSpeaker(activeSpeaker);
-    const t = window.setTimeout(() => setPopSpeaker(null), 480);
-    return () => window.clearTimeout(t);
-  }, [activeSpeaker]);
+  const chairSegments = useMemo(() => buildChairTimelineSegments(round), [round]);
+
+  const activeSpeaker = useMemo(() => feed[feed.length - 1]?.name ?? null, [feed]);
+
+  const displayFeed = useMemo(() => {
+    if (feed.length <= TRANSCRIPT_WINDOW) return { lines: feed, hidden: 0, offset: 0 };
+    const offset = feed.length - TRANSCRIPT_WINDOW;
+    return { lines: feed.slice(offset), hidden: offset, offset };
+  }, [feed]);
 
   useEffect(() => {
     if (!open) return;
@@ -146,37 +170,55 @@ export function DebateTheater({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  useEffect(() => {
+  const scrollTranscript = useCallback(() => {
     const el = transcriptRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [feed.length]);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    if (isReplay || autoFollow) scrollTranscript();
+  }, [feed.length, isReplay, autoFollow, replayPlayback.lineIndex, open, scrollTranscript]);
+
+  const scrollToLine = useCallback((lineIndex: number) => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    const item = el.querySelector(`[data-line-idx="${lineIndex}"]`);
+    if (item instanceof HTMLElement) item.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    if (!isReplay) return;
+    scrollToLine(replayPlayback.lineIndex);
+  }, [isReplay, replayPlayback.lineIndex, scrollToLine]);
 
   const [nowTs, setNowTs] = useState(() => Date.now());
-  const live = state.status === "WORKING" && selectedRoundIdx === activeRoundIdx;
+  const live = !isReplay && state.status === "WORKING" && selectedRoundIdx === activeRoundIdx;
   useEffect(() => {
     if (!open || !live) return;
-    const id = setInterval(() => setNowTs(Date.now()), 1000);
+    const id = setInterval(() => setNowTs(Date.now()), 5000);
     return () => clearInterval(id);
   }, [open, live]);
 
   if (!open) return null;
 
-  const active = state.status === "WORKING";
-  const left = round?.left;
-  const right = round?.right;
-  const changeRows = confidenceShiftRows(rounds, selectedRoundIdx);
+  const active = !isReplay && state.status === "WORKING";
   const matchups = round?.matchups ?? [];
-  const cohorts = round?.cohorts;
   const startTs = feed[0]?.ts ?? null;
-  const elapsed = startTs ? Math.max(0, (live ? nowTs : feed[feed.length - 1]?.ts ?? startTs) - startTs) : 0;
+  const elapsed = startTs
+    ? Math.max(0, (live ? nowTs : feed[feed.length - 1]?.ts ?? startTs) - startTs)
+    : 0;
   const verdictReady = Boolean(round?.summary);
+  const showVerdictFooter = isReplay ? replayPlayback.atVerdict : verdictReady;
   const floorOpen =
+    !isReplay &&
     live &&
     /floor open/i.test(state.message ?? "") &&
     runState === "running" &&
     Boolean(shiftRunId) &&
     Boolean(round?.ticker ?? state.activeDebateTicker ?? state.ticker);
+  const highlightLineIdx = isReplay ? replayPlayback.lineIndex : feed.length - 1;
 
   return (
     <div
@@ -187,62 +229,85 @@ export function DebateTheater({
         background: pal.panelBg,
         border: `1px solid ${pal.panelBorder}`,
         color: pal.text,
-        backdropFilter: "blur(16px)",
       }}
     >
-      {/* committee-room atmosphere */}
       <div
         className="pointer-events-none absolute inset-0"
         aria-hidden
         style={{
           background:
-            "radial-gradient(70% 55% at 14% 12%, rgba(227,178,75,0.12), transparent 62%), radial-gradient(55% 45% at 92% 95%, rgba(227,178,75,0.06), transparent 60%)",
+            "radial-gradient(65% 50% at 8% 0%, rgba(227,178,75,0.1), transparent 55%), radial-gradient(40% 35% at 100% 100%, rgba(47,208,138,0.04), transparent 50%)",
         }}
       />
-      <div className="pointer-events-none absolute inset-0 grain opacity-[0.05] mix-blend-soft-light" aria-hidden />
 
-      {/* header */}
       <header
-        className="relative flex shrink-0 items-center justify-between gap-2 px-3 py-2 sm:px-4"
-        style={{ borderBottom: `1px solid ${ROOM_HAIR}` }}
+        className="relative flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 sm:px-4"
+        style={{ borderBottom: `1px solid ${pal.hair}` }}
       >
-        <div className="min-w-0 font-mono">
-          <div className="truncate text-[11px] font-semibold tracking-[0.16em] sm:text-[12px]">
-            ARGUMENT ROOM · {round?.ticker ?? state.ticker ?? "—"} · R
-            {selectedRoundIdx >= 0 ? selectedRoundIdx + 1 : rounds.length || 1}
+        <div className="min-w-0 flex-1 font-mono">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="text-[11px] font-semibold tracking-[0.14em] sm:text-[12px]">
+              {round?.ticker ?? state.ticker ?? "—"}
+            </span>
+            <span className="text-[9px] tracking-[0.18em]" style={{ color: pal.faint }}>
+              ROUND {selectedRoundIdx >= 0 ? selectedRoundIdx + 1 : rounds.length || 1}
+              {rounds.length > 1 ? ` / ${rounds.length}` : ""}
+            </span>
             {active ? (
-              <span className="ml-2 font-normal tracking-[0.04em]" style={{ color: ROOM_FAINT }}>
-                · {state.message}
+              <span className="truncate text-[9px] tracking-[0.06em]" style={{ color: pal.mute }}>
+                {state.message}
               </span>
             ) : null}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-4 font-mono text-[10px] tracking-[0.18em]" style={{ color: ROOM_MUTE }}>
-          <span className="flex items-center gap-2">
-            <span
-              className="inline-block h-1.5 w-1.5 rounded-full"
-              style={{
-                background: live ? ROOM_BULL : ROOM_FAINT,
-                animation: live ? "pulseDot 1.8s ease-in-out infinite" : undefined,
-              }}
-            />
-            {live ? "LIVE" : verdictReady ? "ROUND OVER" : "REPLAY"}
+
+        <div className="flex shrink-0 items-center gap-2 font-mono text-[9px] tracking-[0.14em]">
+          <StatusPill
+            live={live}
+            isReplay={isReplay}
+            verdictReady={verdictReady}
+            pal={pal}
+          />
+          <span className="tabular-nums" style={{ color: pal.mute }}>
+            {formatElapsed(elapsed)}
           </span>
-          <span className="tabular-nums">{formatElapsed(elapsed)}</span>
+          {!isReplay ? (
+            <>
+              <ToggleChip
+                active={autoFollow}
+                label={autoFollow ? "LIVE" : "FREE"}
+                onClick={() => setAutoFollow((v) => !v)}
+                pal={pal}
+                title="Auto-scroll transcript"
+              />
+              {rounds.length > 1 ? (
+                <ToggleChip
+                  active={pinRound}
+                  label={pinRound ? "PIN" : "AUTO"}
+                  onClick={() => setPinRound((v) => !v)}
+                  pal={pal}
+                  title="Pin round during live shift"
+                />
+              ) : null}
+            </>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setShowRoster((v) => !v)}
+            className="rounded-[2px] px-1.5 py-0.5"
+            style={{
+              border: `1px solid ${showRoster ? `${pal.brass}88` : pal.hair}`,
+              color: showRoster ? pal.brass : pal.faint,
+            }}
+          >
+            ROSTER
+          </button>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close argument room"
-            className="flex h-7 w-7 items-center justify-center rounded-[2px] text-base leading-none transition-colors"
-            style={{ border: `1px solid ${ROOM_HAIR}`, color: ROOM_MUTE }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = ROOM_BRASS;
-              e.currentTarget.style.borderColor = `${ROOM_BRASS}88`;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = ROOM_MUTE;
-              e.currentTarget.style.borderColor = ROOM_HAIR;
-            }}
+            className="flex h-7 w-7 items-center justify-center rounded-[2px] text-base leading-none"
+            style={{ border: `1px solid ${pal.hair}`, color: pal.mute }}
           >
             ×
           </button>
@@ -250,489 +315,529 @@ export function DebateTheater({
       </header>
 
       {rounds.length > 1 ? (
-        <div
-          className="flex shrink-0 gap-1 overflow-x-auto px-2 py-1.5 lg:hidden"
-          style={{ borderBottom: `1px solid ${ROOM_HAIR}` }}
-        >
-          {rounds.map((r, i) => (
-            <button
-              key={`${r.ticker}-m-${i}`}
-              type="button"
-              onClick={() => setSelectedRoundIdx(i)}
-              className="shrink-0 rounded-[2px] px-2 py-1 font-mono text-[8px] tracking-[0.1em]"
-              style={{
-                border: `1px solid ${i === selectedRoundIdx ? `${ROOM_BRASS}88` : ROOM_HAIR}`,
-                color: i === selectedRoundIdx ? ROOM_BRASS : ROOM_MUTE,
-                background: i === selectedRoundIdx ? "rgba(227,178,75,0.08)" : "transparent",
-              }}
-            >
-              R{i + 1} · {r.ticker}
-              {i === activeRoundIdx && active ? " ●" : ""}
-            </button>
-          ))}
-        </div>
+        <RoundPillRail
+          rounds={rounds}
+          selectedIdx={selectedRoundIdx}
+          activeIdx={activeRoundIdx}
+          active={active}
+          pal={pal}
+          onSelect={setSelectedRoundIdx}
+        />
       ) : null}
 
-      <div className="relative flex min-h-0 flex-1">
-        {/* ---------- sidebar: rounds of the shift ---------- */}
-        <aside
-          className="hidden w-[168px] shrink-0 flex-col lg:flex xl:w-[220px]"
-          style={{ borderRight: `1px solid ${ROOM_HAIR}` }}
-        >
-          <div
-            className="px-2.5 py-1.5 font-mono text-[8px] tracking-[0.24em]"
-            style={{ color: ROOM_FAINT, borderBottom: `1px solid ${ROOM_HAIR}` }}
-          >
-            ROUNDS
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
-            {rounds.length === 0 ? (
-              <p className="font-mono text-[10px]" style={{ color: ROOM_FAINT }}>
-                No rounds yet.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {rounds.map((r, i) => (
-                  <RoundCard
-                    key={`${r.ticker}-${i}`}
-                    round={r}
-                    index={i}
-                    selected={i === selectedRoundIdx}
-                    live={i === activeRoundIdx && active}
-                    pal={pal}
-                    onSelect={() => setSelectedRoundIdx(i)}
-                  />
-                ))}
-              </ul>
-            )}
+      {round ? (
+        <SpotlightStrip
+          round={round}
+          matchups={matchups}
+          activeSpeaker={activeSpeaker}
+          nameToAgent={nameToAgent}
+          pal={pal}
+        />
+      ) : (
+        <p className="shrink-0 px-4 py-2 font-mono text-[10px]" style={{ color: pal.faint }}>
+          Pairing debaters…
+        </p>
+      )}
 
-            {changeRows.length > 0 ? (
-              <div className="mt-5">
-                <div className="mb-1.5 font-mono text-[8.5px] tracking-[0.24em]" style={{ color: ROOM_FAINT }}>
-                  MOVED SINCE LAST ROUND
-                </div>
-                <ul className="space-y-1">
-                  {changeRows.map((row) => (
-                    <li
-                      key={row.name}
-                      className="flex items-baseline justify-between gap-2 font-mono text-[9.5px]"
-                    >
-                      <span className="truncate" style={{ color: ROOM_MUTE }}>
-                        {row.name}
-                      </span>
-                      <span
-                        className="tabular-nums"
-                        style={{ color: row.delta >= 0 ? ROOM_BULL : ROOM_BEAR }}
-                      >
-                        {Math.round(row.prev)}→{Math.round(row.now)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </div>
-        </aside>
+      {showRoster && round ? (
+        <RosterDrawer round={round} activeSpeaker={activeSpeaker} nameToAgent={nameToAgent} pal={pal} />
+      ) : null}
 
-        {/* ---------- main column ---------- */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {round ? (
-            <CommitteeBoard
-              round={round}
-              left={left}
-              right={right}
-              cohorts={cohorts}
-              matchups={matchups}
-              activeSpeaker={activeSpeaker}
-              popSpeaker={popSpeaker}
-              nameToAgent={nameToAgent}
-              pal={pal}
-            />
-          ) : (
-            <p className="shrink-0 px-4 py-2 font-mono text-[10px]" style={{ color: ROOM_FAINT }}>
-              Pairing debaters…
-            </p>
-          )}
+      <DebateChairTimeline
+        segments={chairSegments}
+        activeLineIndex={highlightLineIdx}
+        liveFloorOpen={floorOpen}
+        onSeekLine={(idx) => {
+          if (isReplay) replayPlayback.seekLine(idx);
+          else scrollToLine(idx);
+        }}
+        pal={pal}
+      />
 
-          <div
-            className="flex shrink-0 items-center px-4 py-1.5 font-mono text-[8px] tracking-[0.22em]"
-            style={{ color: ROOM_FAINT, borderBottom: `1px solid ${ROOM_HAIR}` }}
-          >
-            <span>TRANSCRIPT · {feed.length} LINE{feed.length === 1 ? "" : "S"}</span>
-          </div>
-          <div
-            ref={transcriptRef}
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3"
-          >
-            {feed.length === 0 ? (
-              <p className="font-mono text-[10.5px] tracking-[0.18em]" style={{ color: ROOM_FAINT }}>
-                CALLING THE ROOM TO ORDER
-                <span style={{ animation: "lp-blink 1.1s steps(1) infinite" }}>_</span>
-              </p>
-            ) : (
-              <ul className="space-y-3">
-                {feed.map((line, i) => (
-                  <TranscriptLine
-                    key={`${line.name}-${line.ts}-${i}`}
-                    line={line}
-                    agent={nameToAgent.get(line.name)}
-                    latest={i === feed.length - 1}
-                    principal={line.mode === "crossfire"}
-                    pal={pal}
-                  />
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <ChairFloorBar
-            visible={floorOpen}
-            ticker={round?.ticker ?? state.activeDebateTicker ?? state.ticker ?? ""}
-            runId={shiftRunId}
-            chairName={chairName}
-            pal={pal}
-          />
-
-          <div
-            className="flex shrink-0 items-center justify-between gap-2 px-4 py-2.5"
-            style={{ borderTop: `1px solid ${ROOM_HAIR}` }}
-          >
-            <span
-              className="inline-flex max-w-[70%] items-center gap-1.5 truncate rounded-[2px] px-2.5 py-1 font-mono text-[9px] tracking-[0.14em] transition-all duration-700"
-              style={{
-                border: `1px solid ${ROOM_BRASS}`,
-                color: ROOM_BRASS,
-                opacity: verdictReady ? 1 : 0.35,
-              }}
-              title={round?.summary ?? undefined}
-            >
-              ⚖ {verdictReady ? (round?.winner_name ?? "DRAW").toUpperCase() : "VERDICT PENDING"}
-            </span>
-            {verdictReady && round?.summary ? (
-              <span
-                className="min-w-0 flex-1 truncate text-right font-mono text-[8.5px]"
-                style={{ color: ROOM_FAINT }}
-                title={round.summary}
-              >
-                {round.summary}
-              </span>
-            ) : null}
-          </div>
-        </div>
+      <div
+        className="flex shrink-0 items-center justify-between px-4 py-1 font-mono text-[8px] tracking-[0.2em]"
+        style={{ color: pal.faint, borderBottom: `1px solid ${pal.hair}` }}
+      >
+        <span>TRANSCRIPT</span>
+        <span className="tabular-nums">
+          {feed.length} line{feed.length === 1 ? "" : "s"}
+          {displayFeed.hidden > 0 ? ` · +${displayFeed.hidden} earlier` : ""}
+        </span>
       </div>
+
+      <div ref={transcriptRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-2 sm:px-4">
+        {feed.length === 0 ? (
+          <p className="font-mono text-[10px] tracking-[0.16em]" style={{ color: pal.faint }}>
+            Calling the room to order
+            <span className="debate-cursor">_</span>
+          </p>
+        ) : (
+          <ul className="space-y-1.5">
+            {displayFeed.hidden > 0 ? (
+              <li
+                className="rounded-[2px] px-2 py-1 text-center font-mono text-[8px] tracking-[0.12em]"
+                style={{ color: pal.faint, border: `1px dashed ${pal.hair}` }}
+              >
+                {displayFeed.hidden} earlier lines collapsed for speed
+              </li>
+            ) : null}
+            {displayFeed.lines.map((line, i) => {
+              const lineIdx = displayFeed.offset + i;
+              return (
+                <TranscriptLine
+                  key={`${line.name}-${line.ts ?? 0}-${lineIdx}`}
+                  line={line}
+                  lineIdx={lineIdx}
+                  agent={nameToAgent.get(line.name)}
+                  latest={lineIdx === highlightLineIdx}
+                  principal={line.mode === "crossfire"}
+                  pal={pal}
+                />
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {isReplay ? (
+        <DebateReplayTransport
+          lineIndex={replayPlayback.lineIndex}
+          lineCount={replayPlayback.model?.lineCount ?? 0}
+          progress={replayPlayback.progress}
+          playing={replayPlayback.playing}
+          speed={replayPlayback.speed}
+          synthesized={synthesized || replayPlayback.model?.synthesized}
+          atVerdict={replayPlayback.atVerdict}
+          pal={pal}
+          onTogglePlay={() => replayPlayback.setPlaying((p) => !p)}
+          onStep={replayPlayback.step}
+          onSeekProgress={replayPlayback.seekProgress}
+          onSpeed={replayPlayback.setSpeed}
+          onJumpVerdict={replayPlayback.jumpVerdict}
+          onJumpPhase={replayPlayback.jumpPhase}
+          onRewind={() => replayPlayback.seekLine(0)}
+        />
+      ) : (
+        <ChairFloorBar
+          visible={floorOpen}
+          ticker={round?.ticker ?? state.activeDebateTicker ?? state.ticker ?? ""}
+          runId={shiftRunId}
+          chairName={chairName}
+          pal={pal}
+        />
+      )}
+
+      <VerdictFooter round={round} show={showVerdictFooter} pal={pal} />
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Committee layout                                                    */
+/* Layout pieces                                                       */
 /* ------------------------------------------------------------------ */
 
-function CommitteeBoard({
+function StatusPill({
+  live,
+  isReplay,
+  verdictReady,
+  pal,
+}: {
+  live: boolean;
+  isReplay: boolean;
+  verdictReady: boolean;
+  pal: TheaterPalette;
+}) {
+  const label = live ? "LIVE" : isReplay ? "REPLAY" : verdictReady ? "CLOSED" : "STANDBY";
+  const color = live ? pal.bull : isReplay ? pal.brass : pal.faint;
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-[2px] px-1.5 py-0.5" style={{ color }}>
+      <span
+        className="inline-block h-1.5 w-1.5 rounded-full"
+        style={{
+          background: color,
+          animation: live ? "pulseDot 1.8s ease-in-out infinite" : undefined,
+        }}
+      />
+      {label}
+    </span>
+  );
+}
+
+function ToggleChip({
+  active,
+  label,
+  onClick,
+  pal,
+  title,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+  pal: TheaterPalette;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="rounded-[2px] px-1.5 py-0.5"
+      style={{
+        border: `1px solid ${active ? `${pal.brass}88` : pal.hair}`,
+        color: active ? pal.brass : pal.faint,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function RoundPillRail({
+  rounds,
+  selectedIdx,
+  activeIdx,
+  active,
+  pal,
+  onSelect,
+}: {
+  rounds: DebateRound[];
+  selectedIdx: number;
+  activeIdx: number;
+  active: boolean;
+  pal: TheaterPalette;
+  onSelect: (i: number) => void;
+}) {
+  return (
+    <div
+      className="flex shrink-0 gap-1 overflow-x-auto px-3 py-1.5"
+      style={{ borderBottom: `1px solid ${pal.hair}` }}
+    >
+      {rounds.map((r, i) => {
+        const selected = i === selectedIdx;
+        const isLive = i === activeIdx && active;
+        const done = Boolean(r.winner && r.summary);
+        return (
+          <button
+            key={`${r.ticker}-${i}`}
+            type="button"
+            onClick={() => onSelect(i)}
+            className="shrink-0 rounded-[2px] px-2 py-1 font-mono text-[8px] tracking-[0.1em]"
+            style={{
+              border: `1px solid ${selected ? `${pal.brass}88` : pal.hair}`,
+              color: selected ? pal.brass : pal.mute,
+              background: selected ? `${pal.brass}10` : "transparent",
+            }}
+          >
+            R{i + 1} {r.ticker}
+            {isLive ? " · live" : done ? " · done" : ""}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SpotlightStrip({
   round,
-  left,
-  right,
-  cohorts,
   matchups,
   activeSpeaker,
-  popSpeaker,
   nameToAgent,
   pal,
 }: {
   round: DebateRound;
-  left?: DebateSide;
-  right?: DebateSide;
-  cohorts?: DebateCohorts;
   matchups: DebateMatchup[];
   activeSpeaker: string | null;
-  popSpeaker: string | null;
   nameToAgent: Map<string, (typeof NAMED_ANALYSTS)[number]>;
   pal: TheaterPalette;
 }) {
-  const bulls = cohorts?.bull ?? (left?.signal === "bullish" ? [left] : []);
-  const bears = cohorts?.bear ?? (right?.signal === "bearish" ? [right] : []);
-  const neutrals = cohorts?.neutral ?? [];
-  const count = round.participant_count ?? bulls.length + bears.length + neutrals.length;
+  const headline = matchups[0] ?? (round.left && round.right ? { bull: round.left, bear: round.right } : null);
+  const count = round.participant_count ?? (round.cohorts
+    ? (round.cohorts.bull?.length ?? 0) + (round.cohorts.bear?.length ?? 0) + (round.cohorts.neutral?.length ?? 0)
+  : 2);
 
   return (
     <div className="shrink-0" style={{ borderBottom: `1px solid ${pal.hair}` }}>
-      <div
-        className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 font-mono text-[8px] tracking-[0.2em]"
-        style={{ color: pal.faint, borderBottom: `1px solid ${pal.hair}` }}
-      >
-        <span>
-          COMMITTEE · {count} VOICES · {matchups.length || 1} DUEL
-          {matchups.length === 1 ? "" : "S"}
-        </span>
-        {left && right ? (
-          <span style={{ color: pal.brass }}>
-            HEADLINE: {left.name.split(" ").pop()?.toUpperCase()} vs{" "}
-            {right.name.split(" ").pop()?.toUpperCase()}
-          </span>
-        ) : null}
-      </div>
-
-      <div className="grid gap-0 sm:grid-cols-3" style={{ borderBottom: `1px solid ${pal.hair}` }}>
-        <CohortColumn
-          title="BULL SIDE"
-          tone={pal.bull}
-          members={bulls}
-          activeSpeaker={activeSpeaker}
-          popSpeaker={popSpeaker}
-          nameToAgent={nameToAgent}
-          pal={pal}
-        />
-        <CohortColumn
-          title="BEAR SIDE"
-          tone={pal.bear}
-          members={bears}
-          activeSpeaker={activeSpeaker}
-          popSpeaker={popSpeaker}
-          nameToAgent={nameToAgent}
-          pal={pal}
-        />
-        <CohortColumn
-          title="NEUTRAL"
-          tone={pal.brass}
-          members={neutrals}
-          activeSpeaker={activeSpeaker}
-          popSpeaker={popSpeaker}
-          nameToAgent={nameToAgent}
-          pal={pal}
-        />
-      </div>
-
-      {matchups.length > 0 ? (
-        <div className="flex gap-2 overflow-x-auto px-4 py-2">
-          {matchups.map((duel, idx) => (
-            <MatchupCard
-              key={`${duel.bull.agent_id}-${duel.bear.agent_id}-${idx}`}
-              duel={duel}
-              index={idx}
-              activeSpeaker={activeSpeaker}
-              popSpeaker={popSpeaker}
-              nameToAgent={nameToAgent}
+      <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-2 px-3 py-2 sm:px-4 sm:py-2.5">
+        {headline ? (
+          <>
+            <SpotlightDebater
+              side={headline.bull}
+              agent={nameToAgent.get(headline.bull.name)}
+              tone={pal.bull}
+              align="left"
+              speaking={activeSpeaker === headline.bull.name}
               pal={pal}
             />
-          ))}
-        </div>
-      ) : left && right ? (
-        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-4 py-3">
-          <DuelChip
-            debater={left}
-            agent={nameToAgent.get(left.name)}
-            speaking={activeSpeaker === left.name}
-            popping={popSpeaker === left.name}
-            barColor={stanceColor(left.signal, pal)}
-            pal={pal}
-          />
-          <span className="px-1 font-mono text-[8px] tracking-[0.2em]" style={{ color: pal.faint }}>
-            VS
-          </span>
-          <DuelChip
-            debater={right}
-            agent={nameToAgent.get(right.name)}
-            speaking={activeSpeaker === right.name}
-            popping={popSpeaker === right.name}
-            barColor={stanceColor(right.signal, pal)}
-            pal={pal}
-            alignRight
-          />
+            <div className="flex flex-col items-center justify-center px-1 font-mono">
+              <span className="text-[7px] tracking-[0.22em]" style={{ color: pal.faint }}>
+                VS
+              </span>
+              <span className="mt-0.5 text-[7px] tabular-nums" style={{ color: pal.mute }}>
+                {count}
+              </span>
+            </div>
+            <SpotlightDebater
+              side={headline.bear}
+              agent={nameToAgent.get(headline.bear.name)}
+              tone={pal.bear}
+              align="right"
+              speaking={activeSpeaker === headline.bear.name}
+              pal={pal}
+            />
+          </>
+        ) : (
+          <p className="col-span-3 font-mono text-[9px]" style={{ color: pal.faint }}>
+            Awaiting headline matchup…
+          </p>
+        )}
+      </div>
+
+      {matchups.length > 1 ? (
+        <div className="flex gap-1 overflow-x-auto px-3 pb-2 sm:px-4">
+          {matchups.map((duel, idx) => {
+            const hot = activeSpeaker === duel.bull.name || activeSpeaker === duel.bear.name;
+            return (
+              <span
+                key={`${duel.bull.agent_id}-${idx}`}
+                className="shrink-0 rounded-[2px] px-1.5 py-0.5 font-mono text-[7px] tracking-[0.08em]"
+                style={{
+                  border: `1px solid ${hot ? `${pal.brass}88` : pal.hair}`,
+                  color: hot ? pal.brass : pal.faint,
+                }}
+              >
+                {duel.bull.name.split(" ").pop()} vs {duel.bear.name.split(" ").pop()}
+              </span>
+            );
+          })}
         </div>
       ) : null}
     </div>
   );
 }
 
-function CohortColumn({
-  title,
-  tone,
-  members,
-  activeSpeaker,
-  popSpeaker,
-  nameToAgent,
-  pal,
-}: {
-  title: string;
-  tone: string;
-  members: DebateSide[];
-  activeSpeaker: string | null;
-  popSpeaker: string | null;
-  nameToAgent: Map<string, (typeof NAMED_ANALYSTS)[number]>;
-  pal: TheaterPalette;
-}) {
-  return (
-    <div className="min-w-0 px-3 py-2" style={{ borderRight: `1px solid ${pal.hair}` }}>
-      <div className="mb-1.5 font-mono text-[7px] tracking-[0.22em]" style={{ color: tone }}>
-        {title} · {members.length}
-      </div>
-      <div className="flex flex-wrap gap-1">
-        {members.length === 0 ? (
-          <span className="font-mono text-[8px]" style={{ color: pal.faint }}>
-            —
-          </span>
-        ) : (
-          members.map((m) => {
-            const agent = nameToAgent.get(m.name);
-            const speaking = activeSpeaker === m.name;
-            const popping = popSpeaker === m.name;
-            return (
-              <span
-                key={m.agent_id}
-                title={`${m.name} · ${Math.round(m.confidence_after)}%`}
-                className="inline-flex items-center gap-1 rounded-[2px] px-1 py-0.5"
-                style={{
-                  border: `1px solid ${speaking ? pal.brass : pal.hair}`,
-                  animation: popping
-                    ? "theater-pop 0.45s cubic-bezier(0.34,1.56,0.64,1) both"
-                    : undefined,
-                }}
-              >
-                <InvestorAvatar
-                  agentKey={agent?.key ?? m.agent_id}
-                  name={m.name}
-                  accent={tone}
-                  size={14}
-                  speaking={speaking}
-                />
-                <span className="max-w-[72px] truncate font-mono text-[7px]" style={{ color: pal.mute }}>
-                  {m.name.split(" ").pop()}
-                </span>
-              </span>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-}
-
-function MatchupCard({
-  duel,
-  index,
-  activeSpeaker,
-  popSpeaker,
-  nameToAgent,
-  pal,
-}: {
-  duel: DebateMatchup;
-  index: number;
-  activeSpeaker: string | null;
-  popSpeaker: string | null;
-  nameToAgent: Map<string, (typeof NAMED_ANALYSTS)[number]>;
-  pal: TheaterPalette;
-}) {
-  const bullSpeaking = activeSpeaker === duel.bull.name;
-  const bearSpeaking = activeSpeaker === duel.bear.name;
-  const active = bullSpeaking || bearSpeaking;
-
-  return (
-    <div
-      className="shrink-0 rounded-[3px] px-2.5 py-2 font-mono"
-      style={{
-        border: `1px solid ${active ? `${pal.brass}88` : pal.hair}`,
-        background: active ? `${pal.brass}10` : pal.glassBg,
-        minWidth: 148,
-      }}
-    >
-      <div className="mb-1 text-[7px] tracking-[0.2em]" style={{ color: pal.faint }}>
-        DUEL {index + 1}
-      </div>
-      <div className="flex items-center justify-between gap-2">
-        <MiniDebater
-          side={duel.bull}
-          agent={nameToAgent.get(duel.bull.name)}
-          tone={pal.bull}
-          speaking={bullSpeaking}
-          popping={popSpeaker === duel.bull.name}
-          pal={pal}
-        />
-        <span className="text-[7px]" style={{ color: pal.faint }}>
-          vs
-        </span>
-        <MiniDebater
-          side={duel.bear}
-          agent={nameToAgent.get(duel.bear.name)}
-          tone={pal.bear}
-          speaking={bearSpeaking}
-          popping={popSpeaker === duel.bear.name}
-          pal={pal}
-          alignRight
-        />
-      </div>
-    </div>
-  );
-}
-
-function MiniDebater({
+const SpotlightDebater = memo(function SpotlightDebater({
   side,
   agent,
   tone,
+  align,
   speaking,
-  popping,
   pal,
-  alignRight,
 }: {
   side: DebateSide;
   agent?: (typeof NAMED_ANALYSTS)[number];
   tone: string;
+  align: "left" | "right";
   speaking: boolean;
-  popping: boolean;
   pal: TheaterPalette;
-  alignRight?: boolean;
 }) {
+  const conf = Math.round(Math.max(0, Math.min(100, side.confidence_after)));
+  const last = side.name.split(" ").pop() ?? side.name;
+  const signal = side.signal === "bullish" ? "BULL" : side.signal === "bearish" ? "BEAR" : "NEUT";
+
   return (
     <div
-      className={`flex min-w-0 items-center gap-1 ${alignRight ? "flex-row-reverse text-right" : ""}`}
+      className={`flex min-w-0 items-center gap-2 ${align === "right" ? "flex-row-reverse text-right" : ""}`}
       style={{
-        animation: popping ? "theater-pop 0.45s cubic-bezier(0.34,1.56,0.64,1) both" : undefined,
-        outline: speaking ? `1px solid ${pal.brass}` : undefined,
-        outlineOffset: 1,
-        borderRadius: 2,
+        borderRadius: 3,
+        padding: "4px 6px",
+        border: `1px solid ${speaking ? `${pal.brass}99` : pal.hair}`,
+        background: speaking ? `${tone}12` : pal.glassBg,
+        transform: speaking ? "translateZ(0)" : undefined,
       }}
     >
       <InvestorAvatar
         agentKey={agent?.key ?? side.agent_id}
         name={side.name}
         accent={tone}
-        size={16}
+        size={28}
         speaking={speaking}
       />
-      <div className="min-w-0">
-        <p className="truncate text-[7px] font-semibold tracking-[0.08em]">
-          {side.name.split(" ").pop()?.toUpperCase()}
+      <div className="min-w-0 flex-1 font-mono">
+        <p className="truncate text-[9px] font-semibold tracking-[0.1em]">{last.toUpperCase()}</p>
+        <p className="text-[8px] tracking-[0.12em]" style={{ color: tone }}>
+          {signal} · {conf}%
         </p>
-        <p className="tabular-nums text-[8px]" style={{ color: tone }}>
-          {Math.round(side.confidence_after)}%
-        </p>
+        <div className={`mt-1 h-1 overflow-hidden rounded-full ${align === "right" ? "ml-auto" : ""}`} style={{ maxWidth: 88, background: `${pal.hair}` }}>
+          <div
+            className="h-full rounded-full transition-[width] duration-300 ease-out"
+            style={{ width: `${conf}%`, background: tone }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+});
+
+function RosterDrawer({
+  round,
+  activeSpeaker,
+  nameToAgent,
+  pal,
+}: {
+  round: DebateRound;
+  activeSpeaker: string | null;
+  nameToAgent: Map<string, (typeof NAMED_ANALYSTS)[number]>;
+  pal: TheaterPalette;
+}) {
+  const groups = [
+    { label: "BULL", tone: pal.bull, members: round.cohorts?.bull ?? (round.left?.signal === "bullish" ? [round.left] : []) },
+    { label: "BEAR", tone: pal.bear, members: round.cohorts?.bear ?? (round.right?.signal === "bearish" ? [round.right] : []) },
+    { label: "NEUT", tone: pal.brass, members: round.cohorts?.neutral ?? [] },
+  ];
+
+  return (
+    <div
+      className="shrink-0 px-3 py-2 sm:px-4"
+      style={{ borderBottom: `1px solid ${pal.hair}`, background: `${pal.brass}06` }}
+    >
+      <div className="grid gap-2 sm:grid-cols-3">
+        {groups.map((g) => (
+          <div key={g.label}>
+            <p className="mb-1 font-mono text-[7px] tracking-[0.2em]" style={{ color: g.tone }}>
+              {g.label} · {g.members.length}
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {g.members.length === 0 ? (
+                <span className="font-mono text-[8px]" style={{ color: pal.faint }}>
+                  —
+                </span>
+              ) : (
+                g.members.map((m) => (
+                  <span
+                    key={m.agent_id}
+                    className="inline-flex items-center gap-1 rounded-[2px] px-1 py-0.5"
+                    style={{
+                      border: `1px solid ${activeSpeaker === m.name ? pal.brass : pal.hair}`,
+                    }}
+                  >
+                    <InvestorAvatar
+                      agentKey={nameToAgent.get(m.name)?.key ?? m.agent_id}
+                      name={m.name}
+                      accent={g.tone}
+                      size={14}
+                      speaking={activeSpeaker === m.name}
+                    />
+                    <span className="max-w-[64px] truncate font-mono text-[7px]" style={{ color: pal.mute }}>
+                      {m.name.split(" ").pop()}
+                    </span>
+                  </span>
+                ))
+              )}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/* Pieces                                                              */
-/* ------------------------------------------------------------------ */
+const TranscriptLine = memo(function TranscriptLine({
+  line,
+  lineIdx,
+  agent,
+  latest,
+  principal,
+  pal,
+}: {
+  line: DebateLine;
+  lineIdx: number;
+  agent?: (typeof NAMED_ANALYSTS)[number];
+  latest: boolean;
+  principal: boolean;
+  pal: TheaterPalette;
+}) {
+  const isChair = line.side === "chair";
+  const isChairConsult = line.mode === "chair_consult";
+  const isOpening = line.mode === "opening";
+  const accent = isChair || isChairConsult ? pal.brass : isOpening ? pal.bull : stanceColor(line.signal, pal);
 
-function stanceColor(signal: string, pal: TheaterPalette): string {
-  if (signal === "bullish") return pal.bull;
-  if (signal === "bearish") return pal.bear;
-  return pal.brass;
-}
+  return (
+    <li
+      data-line-idx={lineIdx}
+      className={`flex gap-2 rounded-[2px] border px-2.5 py-1.5 sm:px-3 sm:py-2 ${latest ? "debate-line-latest" : ""}`}
+      style={{
+        borderColor: isChair || isChairConsult ? `${pal.brass}77` : pal.glassBorder,
+        borderLeftWidth: isChairConsult ? 3 : 1,
+        background: isChair || isChairConsult ? `${pal.brass}10` : isOpening ? `${pal.bull}06` : pal.glassBg,
+        boxShadow: latest ? `inset 2px 0 0 ${accent}` : undefined,
+      }}
+    >
+      {isChair ? (
+        <div
+          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-mono text-[8px] font-bold"
+          style={{ border: `1px solid ${pal.brass}`, color: pal.brass }}
+          aria-hidden
+        >
+          CH
+        </div>
+      ) : (
+        <InvestorAvatar
+          agentKey={agent?.key ?? line.name}
+          name={line.name}
+          accent={ROOM_ASSETS[agent?.key ?? ""]?.accent ?? accent}
+          size={20}
+          speaking={latest}
+        />
+      )}
+      <div className="min-w-0 flex-1 font-mono">
+        <p className="flex flex-wrap items-center gap-x-1.5 text-[7px] font-semibold tracking-[0.1em]">
+          <span style={{ color: latest ? pal.text : pal.mute }}>{line.name}</span>
+          {line.signal ? (
+            <span style={{ color: stanceColor(line.signal, pal) }}>{line.signal}</span>
+          ) : null}
+          <span style={{ color: principal ? pal.bear : pal.brass }}>
+            {principal ? "crossfire" : "thesis"}
+          </span>
+          {line.mode && line.mode !== "opening" && line.mode !== "crossfire" ? (
+            <span style={{ color: pal.faint }}>{line.mode.replace(/_/g, " ")}</span>
+          ) : null}
+        </p>
+        <p className="mt-0.5 text-[11px] leading-snug sm:text-[12px]" style={{ color: latest ? pal.text : pal.mute }}>
+          {line.text}
+        </p>
+      </div>
+    </li>
+  );
+});
 
-function stanceLabel(signal: string): string {
-  if (signal === "bullish") return "BULL CASE";
-  if (signal === "bearish") return "BEAR CASE";
-  return "NEUTRAL";
-}
-
-function formatElapsed(ms: number): string {
-  const total = Math.floor(ms / 1000);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+function VerdictFooter({
+  round,
+  show,
+  pal,
+}: {
+  round: DebateRound | null;
+  show: boolean;
+  pal: TheaterPalette;
+}) {
+  return (
+    <div
+      className="flex shrink-0 flex-col gap-1 px-4 py-2"
+      style={{ borderTop: `1px solid ${pal.hair}` }}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className="inline-flex items-center gap-1.5 rounded-[2px] px-2 py-0.5 font-mono text-[9px] tracking-[0.12em] transition-opacity duration-500"
+          style={{
+            border: `1px solid ${pal.brass}`,
+            color: pal.brass,
+            opacity: show ? 1 : 0.35,
+          }}
+        >
+          {show ? (round?.winner_name ?? "DRAW").toUpperCase() : "VERDICT PENDING"}
+        </span>
+        {show && round?.summary ? (
+          <span className="min-w-0 flex-1 truncate text-right font-mono text-[8px]" style={{ color: pal.faint }} title={round.summary}>
+            {round.summary}
+          </span>
+        ) : null}
+      </div>
+      {show && round?.recap ? (
+        <p className="line-clamp-2 font-mono text-[8px] leading-relaxed" style={{ color: pal.mute }} title={round.recap}>
+          {round.recap}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 function ChairFloorBar({
@@ -769,12 +874,7 @@ function ChairFloorBar({
     setSending(true);
     setError(null);
     try {
-      await postDebateInterjection({
-        run_id: runId,
-        ticker,
-        message,
-        chair_name: chairName,
-      });
+      await postDebateInterjection({ run_id: runId, ticker, message, chair_name: chairName });
       setText("");
       setSent(true);
       window.setTimeout(() => setSent(false), 2400);
@@ -786,15 +886,9 @@ function ChairFloorBar({
   };
 
   return (
-    <div
-      className="shrink-0 px-4 py-2"
-      style={{
-        borderTop: `1px solid ${pal.hair}`,
-        background: `${pal.brass}10`,
-      }}
-    >
-      <div className="mb-1.5 flex items-center justify-between gap-2 font-mono text-[8px] tracking-[0.2em]">
-        <span style={{ color: pal.brass }}>FLOOR OPEN — TAKE THE CHAIR</span>
+    <div className="shrink-0 px-4 py-2" style={{ borderTop: `1px solid ${pal.hair}`, background: `${pal.brass}08` }}>
+      <div className="mb-1.5 flex items-center justify-between gap-2 font-mono text-[8px] tracking-[0.18em]">
+        <span style={{ color: pal.brass }}>FLOOR OPEN</span>
         {sent ? <span style={{ color: pal.bull }}>QUEUED</span> : null}
       </div>
       <div className="flex gap-2">
@@ -810,19 +904,15 @@ function ChairFloorBar({
           rows={2}
           maxLength={1200}
           placeholder={`${chairName}: challenge the committee on ${ticker}…`}
-          className="min-h-[52px] flex-1 resize-none rounded-[2px] bg-transparent px-2 py-1.5 font-mono text-[11px] leading-snug outline-none"
-          style={{ border: `1px solid ${pal.brass}55`, color: pal.text }}
+          className="min-h-[48px] flex-1 resize-none rounded-[2px] bg-transparent px-2 py-1.5 font-mono text-[11px] leading-snug outline-none"
+          style={{ border: `1px solid ${pal.brass}44`, color: pal.text }}
         />
         <button
           type="button"
           onClick={() => void submit()}
           disabled={sending || !text.trim()}
-          className="shrink-0 self-end rounded-[2px] px-3 py-2 font-mono text-[9px] font-semibold tracking-[0.16em] transition-opacity disabled:opacity-40"
-          style={{
-            border: `1px solid ${pal.brass}`,
-            color: pal.brass,
-            background: `${pal.brass}12`,
-          }}
+          className="shrink-0 self-end rounded-[2px] px-3 py-2 font-mono text-[9px] font-semibold tracking-[0.14em] disabled:opacity-40"
+          style={{ border: `1px solid ${pal.brass}`, color: pal.brass, background: `${pal.brass}10` }}
         >
           {sending ? "…" : "SPEAK"}
         </button>
@@ -836,284 +926,15 @@ function ChairFloorBar({
   );
 }
 
-/** Compact principal debater chip for the scoreboard strip. */
-function DuelChip({
-  debater,
-  agent,
-  speaking,
-  popping,
-  barColor,
-  pal,
-  alignRight = false,
-}: {
-  debater: DebateSide;
-  agent?: (typeof NAMED_ANALYSTS)[number];
-  speaking: boolean;
-  popping?: boolean;
-  barColor: string;
-  pal: TheaterPalette;
-  alignRight?: boolean;
-}) {
-  const conf = Math.max(0, Math.min(100, debater.confidence_after));
-  const drop = debater.confidence_before - debater.confidence_after;
-  const cells = 10;
-  const filled = Math.round((conf / 100) * cells);
-  const last = debater.name.split(" ").pop() ?? debater.name;
-
-  return (
-    <div
-      className={`flex min-w-0 items-center gap-2 ${alignRight ? "flex-row-reverse text-right" : ""}`}
-    >
-      <div
-        className="shrink-0"
-        style={{
-          outline: speaking ? `1px solid ${pal.brass}` : `1px solid ${pal.hair}`,
-          outlineOffset: 1,
-          animation: popping
-            ? "theater-pop 0.45s cubic-bezier(0.34,1.56,0.64,1) both"
-            : undefined,
-        }}
-      >
-        <InvestorAvatar
-          agentKey={agent?.key ?? debater.agent_id}
-          name={debater.name}
-          accent={barColor}
-          size={24}
-          speaking={speaking}
-        />
-      </div>
-      <div className="min-w-0 flex-1 font-mono">
-        <p className="truncate text-[9px] font-semibold tracking-[0.12em]">
-          {last.toUpperCase()}{" "}
-          <span style={{ color: barColor }}>● {stanceLabel(debater.signal).split(" ")[0]}</span>
-        </p>
-        <p className="tabular-nums text-[11px] font-bold leading-tight" style={{ color: barColor }}>
-          {Math.round(conf)}%
-          {drop > 0.1 ? (
-            <span className="ml-1 text-[8px] font-medium" style={{ color: pal.bear }}>
-              −{drop.toFixed(0)}
-            </span>
-          ) : null}
-        </p>
-        <div className={`mt-0.5 flex gap-px ${alignRight ? "flex-row-reverse" : ""}`}>
-          {Array.from({ length: cells }, (_, i) => (
-            <span
-              key={i}
-              className="h-1.5 w-1.5 rounded-[1px] sm:h-2 sm:w-2"
-              style={{
-                background: i < filled ? barColor : "rgba(242,239,231,0.14)",
-                transition: `background 0.4s ease ${i * 12}ms`,
-              }}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+function stanceColor(signal: string | undefined, pal: TheaterPalette): string {
+  if (signal === "bullish") return pal.bull;
+  if (signal === "bearish") return pal.bear;
+  return pal.brass;
 }
 
-function TranscriptLine({
-  line,
-  agent,
-  latest,
-  principal,
-  pal,
-}: {
-  line: DebateLine;
-  agent?: (typeof NAMED_ANALYSTS)[number];
-  latest: boolean;
-  principal: boolean;
-  pal: TheaterPalette;
-}) {
-  const isChair = line.side === "chair";
-  return (
-    <li
-      className="flex gap-2 rounded-[3px] border px-3 py-2 backdrop-blur-sm"
-      style={{
-        borderColor: isChair ? `${pal.brass}99` : pal.glassBorder,
-        background: isChair ? `${pal.brass}14` : pal.glassBg,
-        animation: latest ? "riseIn 0.35s cubic-bezier(0.16,1,0.3,1) both" : undefined,
-        boxShadow: latest ? `inset 0 0 0 1px ${pal.brass}22` : undefined,
-      }}
-    >
-      {isChair ? (
-        <div
-          className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-mono text-[9px] font-bold"
-          style={{ border: `1px solid ${pal.brass}`, color: pal.brass }}
-          aria-hidden
-        >
-          ⚖
-        </div>
-      ) : (
-        <InvestorAvatar
-          agentKey={agent?.key ?? line.name}
-          name={line.name}
-          accent={ROOM_ASSETS[agent?.key ?? ""]?.accent ?? "#c2ffcd"}
-          size={20}
-          speaking={latest}
-        />
-      )}
-      <div className="min-w-0 flex-1 font-mono">
-        <p className="flex flex-wrap items-center gap-x-1.5 text-[8px] font-semibold tracking-[0.12em]">
-          <span style={{ color: latest ? pal.text : pal.mute }}>
-            {line.name.toUpperCase()}
-          </span>
-          {line.signal ? (
-            <span
-              className="px-1 py-px text-[7px] tracking-[0.14em]"
-              style={{
-                border: `1px solid ${stanceColor(line.signal, pal)}55`,
-                color: stanceColor(line.signal, pal),
-              }}
-            >
-              {line.signal.toUpperCase()}
-            </span>
-          ) : null}
-          {!principal ? (
-            <span className="text-[7px] tracking-[0.16em]" style={{ color: pal.brass }}>
-              THESIS
-            </span>
-          ) : (
-            <span className="text-[7px] tracking-[0.16em]" style={{ color: pal.bear }}>
-              CROSSFIRE
-            </span>
-          )}
-          {line.matchup ? (
-            <span className="text-[7px] tracking-[0.1em]" style={{ color: pal.faint }}>
-              {line.matchup}
-            </span>
-          ) : null}
-          {line.mode ? (
-            <span
-              className="px-1 py-px text-[7px] tracking-[0.12em]"
-              style={{ border: `1px solid ${pal.hair}`, color: pal.faint }}
-            >
-              {line.mode.replace(/_/g, " ").toUpperCase()}
-            </span>
-          ) : null}
-          {line.targets && line.targets.length > 0 ? (
-            <span className="text-[8px]" style={{ color: pal.faint }}>
-              → {line.targets.join(", ")}
-            </span>
-          ) : null}
-        </p>
-        <p
-          className="mt-0.5 text-[11px] leading-snug sm:text-[12px]"
-          style={{ color: latest ? pal.text : pal.mute }}
-        >
-          {line.text}
-        </p>
-      </div>
-    </li>
-  );
-}
-
-function RoundCard({
-  round,
-  index,
-  selected,
-  live,
-  pal,
-  onSelect,
-}: {
-  round: DebateRound;
-  index: number;
-  selected: boolean;
-  live: boolean;
-  pal: TheaterPalette;
-  onSelect: () => void;
-}) {
-  const done = Boolean(round.winner && round.summary);
-  return (
-    <li>
-      <button
-        type="button"
-        onClick={onSelect}
-        className="w-full rounded-[2px] px-2 py-1.5 text-left font-mono transition-colors"
-        style={{
-          border: `1px solid ${selected ? `${pal.brass}88` : pal.hair}`,
-          background: selected ? `${pal.brass}12` : "transparent",
-        }}
-      >
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[10.5px] font-bold tracking-[0.12em]" style={{ color: pal.text }}>
-            R{index + 1} · {round.ticker}
-          </span>
-          {live ? (
-            <span className="flex items-center gap-1.5 text-[8px] tracking-[0.16em]" style={{ color: pal.bull }}>
-              <span
-                className="inline-block h-1 w-1 rounded-full"
-                style={{ background: pal.bull, animation: "pulseDot 1.8s ease-in-out infinite" }}
-              />
-              LIVE
-            </span>
-          ) : done ? (
-            <span className="text-[8px] tracking-[0.14em]" style={{ color: pal.brass }}>
-              ⚖ {round.winner === "draw" ? "DRAW" : "WIN"}
-            </span>
-          ) : null}
-        </div>
-        <p className="mt-1 truncate text-[9px] tracking-[0.06em]" style={{ color: pal.mute }}>
-          {round.matchups && round.matchups.length > 0
-            ? `${round.matchups.length} paired duels`
-            : `${round.left.name.split(" ").pop()} vs ${round.right.name.split(" ").pop()}`}
-          {round.participant_count && round.participant_count > 2
-            ? ` · ${round.participant_count} voices`
-            : ""}
-        </p>
-        {done ? (
-          <>
-            <p className="mt-1 line-clamp-2 text-[9px] leading-snug" style={{ color: pal.faint }}>
-              {round.winner_name ? `${round.winner_name} — ` : ""}
-              {round.summary}
-            </p>
-            <p className="mt-1 text-[8px] tabular-nums tracking-[0.06em]" style={{ color: pal.faint }}>
-              {round.left.name.split(" ").pop()}: {Math.round(round.left.confidence_before)}→
-              {Math.round(round.left.confidence_after)} · {round.right.name.split(" ").pop()}:{" "}
-              {Math.round(round.right.confidence_before)}→{Math.round(round.right.confidence_after)}
-            </p>
-          </>
-        ) : null}
-      </button>
-    </li>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Data helpers                                                        */
-/* ------------------------------------------------------------------ */
-
-function roundParticipants(round: DebateRound | null): DebateSide[] {
-  if (!round) return [];
-  if (Array.isArray(round.participants) && round.participants.length > 0) {
-    return round.participants;
-  }
-  return [round.left, round.right] as DebateSide[];
-}
-
-function confidenceShiftRows(rounds: DebateRound[], roundIdx: number): {
-  name: string;
-  prev: number;
-  now: number;
-  delta: number;
-}[] {
-  if (roundIdx <= 0 || roundIdx >= rounds.length) return [];
-  const cur = rounds[roundIdx]!;
-  const prev = rounds[roundIdx - 1]!;
-  const prevMap = new Map(roundParticipants(prev).map((p) => [p.agent_id, p]));
-  const rows: { name: string; prev: number; now: number; delta: number }[] = [];
-  for (const p of roundParticipants(cur)) {
-    const pr = prevMap.get(p.agent_id);
-    if (!pr) continue;
-    const delta = p.confidence_after - pr.confidence_after;
-    rows.push({
-      name: p.name,
-      prev: pr.confidence_after,
-      now: p.confidence_after,
-      delta,
-    });
-  }
-  return rows
-    .filter((r) => Math.abs(r.delta) > 0.05)
-    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+function formatElapsed(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }

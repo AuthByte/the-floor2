@@ -7,13 +7,25 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { DATA_ANALYSTS, NAMED_ANALYSTS, SPECIALIST_ANALYSTS } from "../lib/agents";
+import { NAMED_ANALYSTS, SPECIALIST_ANALYSTS } from "../lib/agents";
 import {
   LandingProductDemo,
   LandingSocialProof,
   LandingStickyCta,
 } from "./LandingProductDemo";
 import { LandingFeatureDemos } from "./LandingFeatureDemos";
+import { LandingFeedTeaser } from "./social/LandingFeedTeaser";
+import { LeaderboardTeaser } from "./leaderboard/AgentLeaderboard";
+import {
+  BlurVignetteFrame,
+  FlowBeam,
+  HorizontalScrollCard,
+  HorizontalScrollStrip,
+  PaperSparkleField,
+  SpotlightCard,
+  StackingStepDeck,
+} from "./landing/UiLayouts";
+import { LegalFooterLinks } from "./legal/LegalFooterLinks";
 
 interface Props {
   onEnter: () => void;
@@ -177,6 +189,8 @@ export function Landing({ onEnter }: Props) {
         <DataFeeds />
         <Pipeline onEnter={onEnter} />
         <ProductShowcase onEnter={onEnter} />
+        <LeaderboardTeaser />
+        <LandingFeedTeaser onEnter={onEnter} />
         <LandingFeatureDemos onEnter={onEnter} />
         <DebateShowcase onEnter={onEnter} />
         <BossMemo onEnter={onEnter} />
@@ -184,6 +198,7 @@ export function Landing({ onEnter }: Props) {
         <TheWire onEnter={onEnter} />
         <FloorKit onEnter={onEnter} />
         <HowItWorks onEnter={onEnter} />
+        <Pricing onEnter={onEnter} />
         <Faq />
         <FinalCta onEnter={onEnter} />
       </main>
@@ -202,9 +217,10 @@ function Nav({
   onEnter: () => void;
   scrollTo: (id: string) => void;
 }) {
-  const links: Array<[string, string]> = [
+  const links: Array<[string, string | null]> = [
     ["Demo", "lp-demo"],
     ["Features", "lp-features"],
+    ["Pricing", "lp-pricing"],
     ["Committee", "lp-committee"],
     ["Pipeline", "lp-pipeline"],
     ["Wire", "lp-wire"],
@@ -228,7 +244,7 @@ function Nav({
         </button>
         <nav className="hidden items-center gap-8 md:flex">
           {links.map(([label, id], i) => (
-            <span key={id} className="flex items-center gap-8">
+            <span key={label} className="flex items-center gap-8">
               {i > 0 && (
                 <span
                   className="inline-block h-1 w-1 rotate-45"
@@ -236,14 +252,24 @@ function Nav({
                   aria-hidden
                 />
               )}
-              <button
-                type="button"
-                onClick={() => scrollTo(id)}
-                className="font-mono text-[12px] tracking-[0.14em] transition-opacity hover:opacity-60"
-                style={{ color: INK_SOFT }}
-              >
-                {label}
-              </button>
+              {id ? (
+                <button
+                  type="button"
+                  onClick={() => scrollTo(id)}
+                  className="font-mono text-[12px] tracking-[0.14em] transition-opacity hover:opacity-60"
+                  style={{ color: INK_SOFT }}
+                >
+                  {label}
+                </button>
+              ) : (
+                <a
+                  href="/pricing"
+                  className="font-mono text-[12px] tracking-[0.14em] transition-opacity hover:opacity-60"
+                  style={{ color: INK_SOFT }}
+                >
+                  {label}
+                </a>
+              )}
             </span>
           ))}
         </nav>
@@ -283,8 +309,9 @@ function Hero({
   scrollTo: (id: string) => void;
 }) {
   return (
-    <section className="relative flex min-h-[calc(100dvh-65px)] flex-col">
-      <div className="mx-auto grid w-full max-w-[1320px] flex-1 gap-12 px-6 pt-12 lg:grid-cols-[minmax(0,1fr)_minmax(340px,1.05fr)] lg:items-center lg:gap-10 lg:px-10 lg:pt-16">
+    <section className="relative flex min-h-[calc(100dvh-65px)] flex-col overflow-hidden">
+      <PaperSparkleField density={58} className="opacity-80" />
+      <div className="relative z-[1] mx-auto grid w-full max-w-[1320px] flex-1 gap-12 px-6 pt-12 lg:grid-cols-[minmax(0,1fr)_minmax(340px,1.05fr)] lg:items-center lg:gap-10 lg:px-10 lg:pt-16">
         <div className="text-center lg:text-left">
           <Reveal>
             <p
@@ -300,9 +327,17 @@ function Hero({
           </Reveal>
           <Reveal delay={60}>
             <h1
-              className="text-balance font-display text-[clamp(2.4rem,6vw,4.4rem)] font-semibold leading-[1.03] tracking-tight lg:text-[clamp(2.6rem,4.2vw,4.8rem)]"
+              className="relative text-balance font-display text-[clamp(2.4rem,6vw,4.4rem)] font-semibold leading-[1.03] tracking-tight lg:text-[clamp(2.6rem,4.2vw,4.8rem)]"
               style={{ color: INK }}
             >
+              <span
+                className="pointer-events-none absolute -inset-x-8 -inset-y-4 -z-10 rounded-[40%] opacity-60 blur-3xl"
+                style={{
+                  background:
+                    "radial-gradient(ellipse 70% 55% at 50% 50%, rgba(165,126,34,0.14), transparent 70%)",
+                }}
+                aria-hidden
+              />
               Twenty-two legendary investors.
               <br />
               One after-hours{" "}
@@ -319,9 +354,9 @@ function Hero({
             </p>
           </Reveal>
           <Reveal delay={260}>
-            <div className="mt-9 flex flex-wrap items-center justify-center gap-6 lg:justify-start">
+            <div className="mt-9 flex flex-wrap items-center justify-center gap-4 lg:justify-start">
               <InkPill onClick={onEnter}>
-                Start a shift — free
+                Start free
                 <span
                   aria-hidden
                   className="transition-transform duration-300 group-hover:translate-x-1"
@@ -329,6 +364,13 @@ function Hero({
                   →
                 </span>
               </InkPill>
+              <a
+                href="/pricing"
+                className="inline-flex items-center gap-2 rounded-full px-7 py-3.5 font-mono text-[13px] font-medium tracking-wide transition-transform duration-300 hover:-translate-y-0.5"
+                style={{ border: `1px solid ${INK}`, color: INK, background: "transparent" }}
+              >
+                Go Pro
+              </a>
               <button
                 type="button"
                 onClick={() => scrollTo("lp-demo")}
@@ -356,7 +398,7 @@ function Hero({
       {/* quote tape */}
       <Reveal delay={380}>
         <div
-          className="overflow-hidden whitespace-nowrap py-2.5"
+          className="relative z-[1] overflow-hidden whitespace-nowrap py-2.5"
           style={{ borderTop: `1px solid ${HAIR}`, borderBottom: `1px solid ${HAIR}` }}
         >
           <div
@@ -389,7 +431,7 @@ function Hero({
 
       {/* pixel diorama */}
       <Reveal delay={460}>
-        <div className="mx-auto w-full max-w-[1180px] px-6">
+        <div className="relative z-[1] mx-auto w-full max-w-[1180px] px-6">
           <img
             src="/landing/floor-diorama.png"
             alt="Pixel-art trading floor diorama: investor agents at desks around a debate table"
@@ -504,7 +546,14 @@ const DOSSIERS: DossierCard[] = [
 ];
 
 function Committee({ onEnter }: { onEnter: () => void }) {
-  const [rosterOpen, setRosterOpen] = useState(false);
+  const rosterRef = useRef<HTMLDivElement>(null);
+  const scrollToRoster = () => {
+    rosterRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
+  const portraitFor = (name: string) =>
+    DOSSIERS.find((d) => d.name === name)?.img ?? null;
+  const roster = [...NAMED_ANALYSTS, ...SPECIALIST_ANALYSTS];
+
   return (
     <section id="lp-committee" className="relative py-24 lg:py-32">
       <div className="mx-auto grid max-w-[1320px] gap-14 px-6 lg:grid-cols-[minmax(300px,0.9fr)_2fr] lg:px-10">
@@ -532,11 +581,11 @@ function Committee({ onEnter }: { onEnter: () => void }) {
           <Reveal delay={320}>
             <button
               type="button"
-              onClick={() => setRosterOpen((v) => !v)}
+              onClick={scrollToRoster}
               className="mt-10 font-mono text-[13px] font-medium underline underline-offset-[6px] transition-opacity hover:opacity-60"
               style={{ color: INK }}
             >
-              {rosterOpen ? "Hide the roster" : `Meet all ${NAMED_ANALYSTS.length + SPECIALIST_ANALYSTS.length} →`}
+              {`Meet all ${roster.length} →`}
             </button>
           </Reveal>
         </div>
@@ -545,6 +594,7 @@ function Committee({ onEnter }: { onEnter: () => void }) {
         <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 lg:gap-6">
           {DOSSIERS.map((card, i) => (
             <Reveal key={card.name} delay={i * 90} className={card.offset}>
+              <SpotlightCard className="rounded-[4px]">
               <article
                 className="group rounded-[4px] p-2.5 pb-3 transition-transform duration-500 hover:-translate-y-2 hover:rotate-[0.6deg]"
                 style={{
@@ -586,56 +636,57 @@ function Committee({ onEnter }: { onEnter: () => void }) {
                   / {card.tag}
                 </p>
               </article>
+              </SpotlightCard>
             </Reveal>
           ))}
         </div>
       </div>
 
-      {/* expandable full roster */}
-      <div
-        className="mx-auto max-w-[1320px] overflow-hidden px-6 transition-[max-height,opacity] duration-700 ease-out lg:px-10"
-        style={{ maxHeight: rosterOpen ? 600 : 0, opacity: rosterOpen ? 1 : 0 }}
-      >
-        <div
-          className="mt-12 flex flex-wrap gap-x-8 gap-y-3 rounded-[4px] p-7"
-          style={{ border: `1px solid ${HAIR}`, background: "#FBF9F3" }}
-        >
-          {NAMED_ANALYSTS.map((a) => (
-            <button
-              key={a.key}
-              type="button"
-              onClick={onEnter}
-              className="font-mono text-[11.5px] tracking-[0.1em] transition-colors"
-              style={{ color: INK_SOFT }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = BRASS)}
-              onMouseLeave={(e) => (e.currentTarget.style.color = INK_SOFT)}
-            >
-              {a.name.toUpperCase()}{" "}
-              <span style={{ color: BRASS }}>/ {a.callsign}</span>
-            </button>
-          ))}
-          <p
-            className="mt-4 w-full font-mono text-[10px] uppercase tracking-[0.28em]"
-            style={{ color: INK_SOFT }}
-          >
-            Further analysis
-          </p>
-          {SPECIALIST_ANALYSTS.map((a) => (
-            <button
-              key={a.key}
-              type="button"
-              onClick={onEnter}
-              className="font-mono text-[11.5px] tracking-[0.1em] transition-colors"
-              style={{ color: INK_SOFT }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = BRASS)}
-              onMouseLeave={(e) => (e.currentTarget.style.color = INK_SOFT)}
-            >
-              {a.name.toUpperCase()}{" "}
-              <span style={{ color: BRASS }}>/ {a.callsign}</span>
-            </button>
-          ))}
+      <Reveal delay={420}>
+        <div ref={rosterRef} id="lp-roster-strip" className="mx-auto mt-16 max-w-[1320px] px-6 lg:px-10">
+          <HorizontalScrollStrip label="Full committee roster — scroll →">
+            {roster.map((a) => {
+              const img = portraitFor(a.name);
+              return (
+                <HorizontalScrollCard
+                  key={a.key}
+                  onClick={onEnter}
+                  className="group w-[168px] rounded-[4px] p-3 transition-transform duration-300 hover:-translate-y-1"
+                  style={{
+                    background: "#FBF9F3",
+                    border: `1px solid ${HAIR}`,
+                    boxShadow: "0 12px 28px -22px rgba(18,17,14,0.45)",
+                  }}
+                >
+                  {img ? (
+                    <img
+                      src={img}
+                      alt=""
+                      className="lp-pixel mb-2.5 aspect-square w-full rounded-[2px] object-cover"
+                      draggable={false}
+                    />
+                  ) : (
+                    <div
+                      className="mb-2.5 flex aspect-square w-full items-center justify-center rounded-[2px]"
+                      style={{ background: PAPER_DEEP }}
+                    >
+                      <span className="font-mono text-[10px] tracking-[0.2em]" style={{ color: BRASS }}>
+                        {a.callsign}
+                      </span>
+                    </div>
+                  )}
+                  <p className="font-mono text-[10.5px] font-semibold leading-snug" style={{ color: INK }}>
+                    {a.name}
+                  </p>
+                  <p className="mt-0.5 font-mono text-[9px] tracking-[0.16em]" style={{ color: INK_SOFT }}>
+                    / {a.callsign}
+                  </p>
+                </HorizontalScrollCard>
+              );
+            })}
+          </HorizontalScrollStrip>
         </div>
-      </div>
+      </Reveal>
     </section>
   );
 }
@@ -783,11 +834,9 @@ function Pipeline({ onEnter }: { onEnter: () => void }) {
               {i < PIPELINE_STEPS.length - 1 && (
                 <span
                   aria-hidden
-                  className="absolute right-[-14px] top-14 hidden items-center lg:flex"
-                  style={{ color: BRASS }}
+                  className="absolute right-[-18px] top-14 hidden items-center lg:flex"
                 >
-                  <span className="block h-px w-6" style={{ background: BRASS }} />
-                  <span className="-ml-1 text-[10px]">›</span>
+                  <FlowBeam />
                 </span>
               )}
             </Reveal>
@@ -949,6 +998,7 @@ function DebateShowcase({ onEnter }: { onEnter: () => void }) {
 
         {/* live demo panel */}
         <Reveal delay={180} className="order-1 lg:order-2">
+          <BlurVignetteFrame radius="6px">
           <div
             className="rounded-[6px] backdrop-blur-sm"
             style={{
@@ -1053,6 +1103,7 @@ function DebateShowcase({ onEnter }: { onEnter: () => void }) {
               </div>
             </div>
           </div>
+          </BlurVignetteFrame>
         </Reveal>
       </div>
     </section>
@@ -1726,6 +1777,7 @@ function FloorKit({ onEnter }: { onEnter: () => void }) {
         <div className="mt-16 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {FLOOR_TOOLS.map((tool, i) => (
             <Reveal key={tool.tag} delay={i * 80}>
+              <SpotlightCard className="h-full rounded-[4px]">
               <article
                 className="group flex h-full flex-col rounded-[4px] p-6 transition-transform duration-300 hover:-translate-y-1"
                 style={{
@@ -1753,6 +1805,7 @@ function FloorKit({ onEnter }: { onEnter: () => void }) {
                   {tool.body}
                 </p>
               </article>
+              </SpotlightCard>
             </Reveal>
           ))}
         </div>
@@ -1838,6 +1891,30 @@ const HOW_STEPS = [
 ] as const;
 
 function HowItWorks({ onEnter }: { onEnter: () => void }) {
+  const stepArticle = (step: (typeof HOW_STEPS)[number]) => (
+    <article
+      className="relative flex h-full flex-col rounded-[5px] p-7"
+      style={{
+        border: "1px solid rgba(242,239,231,0.12)",
+        background: "rgba(20,18,12,0.55)",
+        boxShadow: "0 28px 60px -40px rgba(0,0,0,0.65)",
+      }}
+    >
+      <span
+        className="font-display text-[3.5rem] font-semibold leading-none"
+        style={{ color: "rgba(242,239,231,0.08)" }}
+        aria-hidden
+      >
+        {step.n}
+      </span>
+      <h3 className="mt-2 font-mono text-[15px] font-semibold tracking-[0.06em]">{step.title}</h3>
+      <p className="mt-3 flex-1 font-mono text-[11.5px] leading-relaxed text-[#9b988d]">{step.body}</p>
+      <p className="mt-5 font-mono text-[10px] tracking-[0.2em]" style={{ color: BRASS }}>
+        {step.cta}
+      </p>
+    </article>
+  );
+
   return (
     <section className="relative overflow-hidden py-24 lg:py-32" style={{ background: INK, color: PAPER }}>
       <div
@@ -1864,32 +1941,19 @@ function HowItWorks({ onEnter }: { onEnter: () => void }) {
           </Reveal>
         </div>
 
-        <div className="mt-16 grid gap-6 lg:grid-cols-3">
+        <div className="mt-16 grid gap-6 lg:hidden">
           {HOW_STEPS.map((step, i) => (
             <Reveal key={step.n} delay={i * 120}>
-              <article
-                className="relative flex h-full flex-col rounded-[5px] p-7"
-                style={{
-                  border: "1px solid rgba(242,239,231,0.12)",
-                  background: "rgba(20,18,12,0.55)",
-                }}
-              >
-                <span
-                  className="font-display text-[3.5rem] font-semibold leading-none"
-                  style={{ color: "rgba(242,239,231,0.08)" }}
-                  aria-hidden
-                >
-                  {step.n}
-                </span>
-                <h3 className="mt-2 font-mono text-[15px] font-semibold tracking-[0.06em]">{step.title}</h3>
-                <p className="mt-3 flex-1 font-mono text-[11.5px] leading-relaxed text-[#9b988d]">{step.body}</p>
-                <p className="mt-5 font-mono text-[10px] tracking-[0.2em]" style={{ color: BRASS }}>
-                  {step.cta}
-                </p>
-              </article>
+              {stepArticle(step)}
             </Reveal>
           ))}
         </div>
+
+        <StackingStepDeck className="mx-auto mt-16 hidden max-w-md lg:block">
+          {HOW_STEPS.map((step) => (
+            <div key={step.n}>{stepArticle(step)}</div>
+          ))}
+        </StackingStepDeck>
 
         <Reveal delay={450}>
           <div className="mt-14 text-center">
@@ -1903,6 +1967,141 @@ function HowItWorks({ onEnter }: { onEnter: () => void }) {
               <span aria-hidden>→</span>
             </button>
           </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Section — Pricing                                                   */
+/* ------------------------------------------------------------------ */
+
+const LANDING_TIERS = [
+  {
+    name: "Free",
+    price: "$0",
+    period: "forever",
+    highlight: false,
+    features: ["2 shifts / month", "3 legends", "Read-only feed"],
+    cta: "Start free",
+    href: null as string | null,
+  },
+  {
+    name: "Pro",
+    price: "$29",
+    period: "/ mo",
+    highlight: true,
+    features: ["Unlimited shifts", "Full roster", "Paper + publish"],
+    cta: "Go Pro",
+    href: "/pricing",
+  },
+  {
+    name: "Day pass",
+    price: "$9",
+    period: "24h",
+    highlight: false,
+    features: ["Full Pro for one day", "No subscription", "Deep-dive sessions"],
+    cta: "Day pass",
+    href: "/pricing",
+  },
+] as const;
+
+function Pricing({ onEnter }: { onEnter: () => void }) {
+  return (
+    <section id="lp-pricing" className="relative py-24 lg:py-32" style={{ background: PAPER_DEEP }}>
+      <div className="mx-auto max-w-[1320px] px-6 lg:px-10">
+        <div className="mx-auto max-w-2xl text-center">
+          <Reveal>
+            <Kicker>12 — Pricing</Kicker>
+          </Reveal>
+          <Reveal delay={100}>
+            <h2
+              className="mt-5 font-display text-[clamp(2rem,4vw,3.2rem)] font-semibold leading-[1.05] tracking-tight"
+              style={{ color: INK }}
+            >
+              Start free. Scale when
+              <br />
+              the committee earns its seat.
+            </h2>
+          </Reveal>
+          <Reveal delay={180}>
+            <p className="mx-auto mt-5 max-w-lg font-mono text-[12px] leading-relaxed" style={{ color: INK_SOFT }}>
+              Paper trading only — no custody, no advice. Pro unlocks the full floor;
+              day pass for one marathon session.
+            </p>
+          </Reveal>
+        </div>
+
+        <div className="mt-14 grid gap-5 md:grid-cols-3">
+          {LANDING_TIERS.map((tier, i) => (
+            <Reveal key={tier.name} delay={i * 90}>
+              <article
+                className={`flex h-full flex-col rounded-[4px] p-7 transition-transform duration-300 hover:-translate-y-1 ${
+                  tier.highlight ? "ring-2 ring-brass/50 ring-offset-2 ring-offset-[#EAE6DA]" : ""
+                }`}
+                style={{
+                  background: tier.highlight ? INK : "#FBF9F3",
+                  color: tier.highlight ? PAPER : INK,
+                  border: tier.highlight ? `1px solid ${INK}` : `1px solid ${HAIR}`,
+                  boxShadow: "0 20px 44px -28px rgba(18,17,14,0.35)",
+                }}
+              >
+                <h3 className="font-display text-[1.4rem] font-semibold tracking-tight">{tier.name}</h3>
+                <div className="mt-3 flex items-baseline gap-1">
+                  <span className="font-display text-[2.2rem] font-semibold leading-none">{tier.price}</span>
+                  <span
+                    className="font-mono text-[11px]"
+                    style={{ color: tier.highlight ? "rgba(242,239,231,0.55)" : INK_SOFT }}
+                  >
+                    {tier.period}
+                  </span>
+                </div>
+                <ul className="mt-5 flex flex-1 flex-col gap-2">
+                  {tier.features.map((f) => (
+                    <li
+                      key={f}
+                      className="font-mono text-[11px] leading-relaxed"
+                      style={{ color: tier.highlight ? "rgba(242,239,231,0.8)" : INK_SOFT }}
+                    >
+                      · {f}
+                    </li>
+                  ))}
+                </ul>
+                {tier.href ? (
+                  <a
+                    href={tier.href}
+                    className="mt-7 inline-flex justify-center rounded-full px-6 py-3 font-mono text-[12px] font-medium tracking-wide transition-transform hover:-translate-y-0.5"
+                    style={
+                      tier.highlight
+                        ? { background: PAPER, color: INK }
+                        : { background: INK, color: PAPER }
+                    }
+                  >
+                    {tier.cta}
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onEnter}
+                    className="mt-7 rounded-full px-6 py-3 font-mono text-[12px] font-medium tracking-wide transition-transform hover:-translate-y-0.5"
+                    style={{ background: INK, color: PAPER }}
+                  >
+                    {tier.cta}
+                  </button>
+                )}
+              </article>
+            </Reveal>
+          ))}
+        </div>
+
+        <Reveal delay={360}>
+          <p className="mt-10 text-center font-mono text-[11px] tracking-[0.12em]" style={{ color: INK_SOFT }}>
+            Annual Pro at $249/yr on the{" "}
+            <a href="/pricing" className="underline underline-offset-4 transition-opacity hover:opacity-70" style={{ color: INK }}>
+              full pricing page
+            </a>
+          </p>
         </Reveal>
       </div>
     </section>
@@ -2023,14 +2222,23 @@ function FinalCta({ onEnter }: { onEnter: () => void }) {
         </Reveal>
         <Reveal delay={280}>
           <div className="mt-12 flex flex-col items-center gap-4">
-            <InkPill onClick={onEnter} className="!px-12 !py-4 text-[14px]">
-              Enter the Floor
-              <span
-                className="inline-block h-2 w-2 rounded-full"
-                style={{ background: "#2fd08a", animation: "pulseDot 1.8s ease-in-out infinite" }}
-                aria-hidden
-              />
-            </InkPill>
+            <div className="flex flex-wrap items-center justify-center gap-4">
+              <InkPill onClick={onEnter} className="!px-12 !py-4 text-[14px]">
+                Start free
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ background: "#2fd08a", animation: "pulseDot 1.8s ease-in-out infinite" }}
+                  aria-hidden
+                />
+              </InkPill>
+              <a
+                href="/pricing"
+                className="inline-flex items-center gap-2 rounded-full px-10 py-4 font-mono text-[14px] font-medium tracking-wide transition-transform hover:-translate-y-0.5"
+                style={{ border: `1px solid ${INK}`, color: INK }}
+              >
+                Go Pro
+              </a>
+            </div>
             <p className="font-mono text-[11px] tracking-[0.12em]" style={{ color: INK_SOFT }}>
               Free · bring your own OpenRouter key · paper trading only
             </p>
@@ -2068,6 +2276,8 @@ function FinalCta({ onEnter }: { onEnter: () => void }) {
             <rect x="7" y="13" width="10" height="2" fill="currentColor" />
           </svg>
           <nav className="flex items-center gap-2 font-mono text-[10.5px] tracking-[0.14em]" style={{ color: INK_SOFT }}>
+            <LegalFooterLinks />
+            <span aria-hidden>/</span>
             <a
               href="https://github.com/AuthByte/the-floor2"
               target="_blank"
@@ -2085,10 +2295,6 @@ function FinalCta({ onEnter }: { onEnter: () => void }) {
             >
               Docs
             </a>
-            <span aria-hidden>/</span>
-            <span title={`Data desks: ${DATA_ANALYSTS.length} · research and paper trading only`}>
-              Disclaimers
-            </span>
           </nav>
         </div>
       </footer>

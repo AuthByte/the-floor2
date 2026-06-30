@@ -1,8 +1,12 @@
 import { useEffect } from "react";
 import type { AgentDef } from "../lib/agents";
 import { getAgentProfile } from "../lib/agentProfiles";
+import { AgentScorecardBadge } from "./AgentScorecardBadge";
 import { AgentAnalysisView } from "./analysis/AgentAnalysisView";
+import { tokenUsageLine } from "../lib/tokenUsage";
 import { DATA_ANALYSTS, DEBATE_AGENT, RISK_PIPELINE_AGENTS } from "../lib/agents";
+import { parseOutlookFromAnalysis } from "../lib/outlookFormat";
+import { hasPriceTargetData, PriceTargetTable } from "./PriceTargetTable";
 import { RiskPipelinePanel } from "./RiskPipelinePanel";
 import { SubAgentsPanel } from "./SubAgentsPanel";
 import { displayThesisText, extractSignal, formatTs } from "../lib/thesisText";
@@ -53,15 +57,32 @@ export function RoomDetailPanel({ selection, state, onClose }: Props) {
   const isDataAgent = DATA_ANALYSTS.some((a) => a.key === agent.key);
   const signal = extractSignal(state.analysis);
   const past = [...(state.thesisHistory ?? [])].reverse();
+  const outlook = parseOutlookFromAnalysis(state.analysis);
+  const priceTargetRows =
+    state.ticker && (state.verdict?.priceTarget != null || outlook.price_target != null)
+      ? [
+          {
+            agentName: agent.name,
+            agentKey: agent.key,
+            currentPrice:
+              state.verdict?.referencePrice ?? outlook.reference_price,
+            priceTarget: state.verdict?.priceTarget ?? outlook.price_target,
+            upsidePct: state.verdict?.upsidePct ?? outlook.upside_pct,
+            timeHorizonMonths:
+              state.verdict?.timeHorizonMonths ?? outlook.time_horizon_months ?? 12,
+          },
+        ]
+      : [];
+  const showPriceTargets = hasPriceTargetData(priceTargetRows);
 
   return (
     <div
-      className="absolute inset-0 z-30 flex justify-end bg-ink-950/55 backdrop-blur-[2px]"
+      className="desk-backdrop absolute inset-0 z-30 flex animate-fade-in justify-end bg-ink-950/55 backdrop-blur-[2px]"
       role="presentation"
       onMouseDown={onClose}
     >
       <aside
-        className="flex h-full w-full max-w-md animate-rise-in flex-col border-l border-brass/25 bg-ink-950 shadow-float"
+        className="flex h-full w-full max-w-md animate-slide-in-right flex-col border-l border-brass/25 bg-ink-950 shadow-float"
         role="dialog"
         aria-labelledby="room-detail-title"
         onMouseDown={(e) => e.stopPropagation()}
@@ -82,6 +103,13 @@ export function RoomDetailPanel({ selection, state, onClose }: Props) {
               <div className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-wire-500">
                 {agent.callsign} · {agent.desk}
               </div>
+              <AgentScorecardBadge agentKey={agent.key} />
+              {state.tokenUsage?.total_tokens ? (
+                <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.16em] text-wire-500">
+                  <span className="text-brass/80">tokens · </span>
+                  {tokenUsageLine(state.tokenUsage)}
+                </p>
+              ) : null}
             </div>
             <button
               type="button"
@@ -110,7 +138,7 @@ export function RoomDetailPanel({ selection, state, onClose }: Props) {
           ) : null}
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="desk-stagger min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {isRiskPipeline ? (
             <section className="mb-5">
               <SectionTitle tone="siren">risk pipeline</SectionTitle>
@@ -204,6 +232,11 @@ export function RoomDetailPanel({ selection, state, onClose }: Props) {
                   <p className="text-[11px] leading-snug text-wire-100">
                     {state.verdict.summary}
                   </p>
+                  {showPriceTargets ? (
+                    <div className="mt-3">
+                      <PriceTargetTable rows={priceTargetRows} variant="floor" />
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
               <SectionTitle>

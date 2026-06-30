@@ -4,6 +4,12 @@ from fastapi.staticfiles import StaticFiles
 import logging
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from app.backend.config import app_version, validate_production_env
+from app.backend.middleware.rate_limit import HedgeFundRunRateLimitMiddleware
 from app.backend.paths import artifact_dir
 from app.backend.routes import api_router
 from app.backend.database.connection import engine
@@ -14,7 +20,13 @@ from app.backend.services.ollama_service import ollama_service
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="THE FLOOR API", description="Backend API for THE FLOOR", version="0.1.0")
+validate_production_env()
+
+app = FastAPI(
+    title="THE FLOOR API",
+    description="Backend API for THE FLOOR",
+    version=app_version(),
+)
 
 # Initialize database tables (this is safe to run multiple times)
 Base.metadata.create_all(bind=engine)
@@ -33,6 +45,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(HedgeFundRunRateLimitMiddleware)
 
 # Mount static artifact files (agent-generated charts).
 _artifact_dir = artifact_dir()

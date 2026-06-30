@@ -12,6 +12,7 @@ from src.tools.api import (
     get_financial_metrics,
     get_insider_trades,
 )
+from src.tools.providers.keys import merge_api_keys
 from app.backend.services.graph import run_graph_async, parse_hedge_fund_response
 from app.backend.services.portfolio import create_portfolio
 
@@ -227,13 +228,13 @@ class BacktestService:
         end_date_dt = datetime.strptime(self.end_date, "%Y-%m-%d")
         start_date_dt = end_date_dt - relativedelta(years=1)
         start_date_str = start_date_dt.strftime("%Y-%m-%d")
-        api_key = self.request.api_keys.get("FINANCIAL_DATASETS_API_KEY")
+        api_keys = merge_api_keys(self.request.api_keys)
 
         for ticker in self.tickers:
-            get_prices(ticker, start_date_str, self.end_date, api_key=api_key)
-            get_financial_metrics(ticker, self.end_date, limit=10, api_key=api_key)
-            get_insider_trades(ticker, self.end_date, start_date=self.start_date, limit=1000, api_key=api_key)
-            get_company_news(ticker, self.end_date, start_date=self.start_date, limit=1000, api_key=api_key)
+            get_prices(ticker, start_date_str, self.end_date, api_key=api_keys)
+            get_financial_metrics(ticker, self.end_date, limit=10, api_key=api_keys)
+            get_insider_trades(ticker, self.end_date, start_date=self.start_date, limit=1000, api_key=api_keys)
+            get_company_news(ticker, self.end_date, start_date=self.start_date, limit=1000, api_key=api_keys)
 
     def _update_performance_metrics(self, performance_metrics: Dict[str, Any]):
         """Update performance metrics using daily returns."""
@@ -509,6 +510,84 @@ class BacktestService:
             "performance_metrics": performance_metrics,
             "portfolio_values": self.portfolio_values,
             "final_portfolio": self.portfolio,
+            "portfolio_curve": self.serialize_portfolio_curve(),
+            "benchmark": self.build_benchmark_payload(),
+        }
+
+    def serialize_portfolio_curve(self) -> List[Dict[str, Any]]:
+        """JSON-safe equity curve for API consumers."""
+        curve: List[Dict[str, Any]] = []
+        for row in self.portfolio_values:
+            dt = row["Date"]
+            date_str = dt.strftime("%Y-%m-%d") if hasattr(dt, "strftime") else str(dt)
+            curve.append(
+                {
+                    "date": date_str,
+                    "portfolio_value": float(row["Portfolio Value"]),
+                    "long_exposure": float(row.get("Long Exposure") or 0),
+                    "short_exposure": float(row.get("Short Exposure") or 0),
+                    "gross_exposure": float(row.get("Gross Exposure") or 0),
+                    "net_exposure": float(row.get("Net Exposure") or 0),
+                }
+            )
+        return curve
+
+    def build_benchmark_payload(self) -> Dict[str, Any]:
+        """Buy-and-hold SPY curve normalized to initial capital."""
+        from src.backtesting.benchmarks import BenchmarkCalculator
+
+        calc = BenchmarkCalculator()
+        spy_return_pct = calc.get_return_pct("SPY", self.start_date, self.end_date)
+        curve: List[Dict[str, Any]] = []
+
+        if not self.portfolio_values:
+            return {"spy_return_pct": spy_return_pct, "spy_curve": curve}
+
+        try:
+            spy_df = get_price_data("SPY", self.start_date, self.end_date)
+            if spy_df.empty:
+                return {"spy_return_pct": spy_return_pct, "spy_curve": curve}
+
+            spy_df = spy_df.copy()
+            if "date" in spy_df.columns:
+                spy_df["date"] = pd.to_datetime(spy_df["date"])
+                spy_df = spy_df.set_index("date")
+            elif not isinstance(spy_df.index, pd.DatetimeIndex):
+                spy_df.index = pd.to_datetime(spy_df.index)
+
+            first_close = float(spy_df.iloc[0]["close"])
+            if first_close <= 0:
+                return {"spy_return_pct": spy_return_pct, "spy_curve": curve}
+
+            for row in self.portfolio_values:
+                dt = row["Date"]
+                if not hasattr(dt, "strftime"):
+                    dt = pd.to_datetime(dt)
+                date_str = dt.strftime("%Y-%m-%d")
+                subset = spy_df.loc[:dt]
+                if subset.empty:
+                    continue
+                close = float(subset.iloc[-1]["close"])
+                curve.append(
+                    {
+                        "date": date_str,
+                        "value": self.initial_capital * (close / first_close),
+                    }
+                )
+        except Exception:
+            pass
+
+        portfolio_return_pct = None
+        if self.portfolio_values:
+            first_val = float(self.portfolio_values[0]["Portfolio Value"])
+            last_val = float(self.portfolio_values[-1]["Portfolio Value"])
+            if first_val > 0:
+                portfolio_return_pct = (last_val / first_val - 1.0) * 100.0
+
+        return {
+            "spy_return_pct": spy_return_pct,
+            "spy_curve": curve,
+            "portfolio_return_pct": portfolio_return_pct,
         }
 
     def run_backtest_sync(self) -> Dict[str, Any]:

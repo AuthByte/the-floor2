@@ -11,13 +11,19 @@ from langchain_core.messages import HumanMessage
 from src.tools.api import (
     get_financial_metrics,
     get_market_cap,
+    get_prices,
     search_line_items,
 )
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 from src.utils.llm import call_llm
 from src.utils.progress import progress
-from src.utils.thesis_outlook import ThesisOutlookFields, latest_close
-from src.utils.thesis_verdict import finish_from_signal
+from src.utils.thesis_outlook import (
+    OUTLOOK_JSON_SCHEMA,
+    OUTLOOK_PROMPT_RULES,
+    ThesisOutlookFields,
+    latest_close,
+)
+from src.utils.thesis_verdict import finish_from_signal, merge_finish_outlook
 from src.utils.interactive_artifacts import build_damodaran_artifacts
 
 
@@ -39,7 +45,7 @@ def aswath_damodaran_agent(state: AgentState, agent_id: str = "aswath_damodaran_
     data      = state["data"]
     end_date  = data["end_date"]
     tickers   = data["tickers"]
-    api_key  = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
 
     analysis_data: dict[str, dict] = {}
     damodaran_signals: dict[str, dict] = {}
@@ -48,7 +54,7 @@ def aswath_damodaran_agent(state: AgentState, agent_id: str = "aswath_damodaran_
         current_price = None
         # ─── Fetch core data ────────────────────────────────────────────────────
         progress.update_status(agent_id, ticker, "Fetching financial metrics")
-        metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=5, api_key=api_key)
+        metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=5, api_key=api_keys)
 
         progress.update_status(agent_id, ticker, "Fetching financial line items")
         line_items = search_line_items(
@@ -64,11 +70,19 @@ def aswath_damodaran_agent(state: AgentState, agent_id: str = "aswath_damodaran_
                 "total_debt",
             ],
             end_date,
-            api_key=api_key,
+            api_key=api_keys,
         )
 
         progress.update_status(agent_id, ticker, "Getting market cap")
-        market_cap = get_market_cap(ticker, end_date, api_key=api_key)
+        market_cap = get_market_cap(ticker, end_date, api_key=api_keys)
+
+        prices = get_prices(
+            ticker,
+            start_date=data["start_date"],
+            end_date=end_date,
+            api_key=api_keys,
+        )
+        current_price = latest_close(prices)
 
         # ─── Analyses ───────────────────────────────────────────────────────────
         progress.update_status(agent_id, ticker, "Analyzing growth and reinvestment")
@@ -123,6 +137,7 @@ def aswath_damodaran_agent(state: AgentState, agent_id: str = "aswath_damodaran_
             analysis_data=analysis_data,
             state=state,
             agent_id=agent_id,
+            current_price=current_price,
         )
 
         damodaran_signals[ticker] = damodaran_output.model_dump()
@@ -138,7 +153,9 @@ def aswath_damodaran_agent(state: AgentState, agent_id: str = "aswath_damodaran_
             state,
             artifacts=artifacts or None,
             current_price=current_price,
+            analysis_data=analysis_data[ticker],
         )
+        merge_finish_outlook(damodaran_signals[ticker], state, agent_id, ticker)
 
     # ─── Push message back to graph state ──────────────────────────────────────
     message = HumanMessage(content=json.dumps(damodaran_signals), name=agent_id)
@@ -378,6 +395,7 @@ def generate_damodaran_output(
     analysis_data: dict[str, any],
     state: AgentState,
     agent_id: str,
+    current_price: float | None = None,
 ) -> AswathDamodaranSignal:
     """
     Ask the LLM to channel Prof. Damodaran's analytical style:
@@ -397,11 +415,13 @@ def generate_damodaran_output(
                   ◦ Connect that story to key numerical drivers: revenue growth, margins, reinvestment, risk
                   ◦ Conclude with value: your FCFF DCF estimate, margin of safety, and relative valuation sanity checks
                   ◦ Highlight major uncertainties and how they affect value
+                {outlook_rules}
                 Return ONLY the JSON specified below.""",
             ),
             (
                 "human",
                 """Ticker: {ticker}
+                Latest close (USD): {current_price}
 
                 Analysis data:
                 {analysis_data}
@@ -410,13 +430,22 @@ def generate_damodaran_output(
                 {{
                   "signal": "bullish" | "bearish" | "neutral",
                   "confidence": float (0-100),
-                  "reasoning": "string"
+                  "reasoning": "string",
+{outlook_schema}
                 }}""",
             ),
         ]
     )
 
-    prompt = template.invoke({"analysis_data": json.dumps(analysis_data, indent=2), "ticker": ticker})
+    ticker_data = analysis_data.get(ticker, analysis_data) if isinstance(analysis_data, dict) else analysis_data
+
+    prompt = template.invoke({
+        "analysis_data": json.dumps(ticker_data, indent=2, default=str),
+        "ticker": ticker,
+        "current_price": current_price if current_price is not None else "unknown",
+        "outlook_rules": OUTLOOK_PROMPT_RULES,
+        "outlook_schema": OUTLOOK_JSON_SCHEMA,
+    })
 
     def default_signal():
         return AswathDamodaranSignal(

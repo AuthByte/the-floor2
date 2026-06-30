@@ -12,7 +12,36 @@ from src.graph.state import AgentState
 from src.llm.models import ModelProvider, get_model
 from src.utils.progress import progress
 from src.utils.ticker_dossier import record_ticker_claim
-from src.utils.thesis_outlook import enrich_outlook, extract_outlook
+from src.utils.thesis_outlook import derive_price_target, enrich_outlook, extract_outlook
+
+OUTLOOK_MERGE_KEYS = (
+    "thesis_summary",
+    "time_horizon_months",
+    "price_target",
+    "upside_pct",
+    "reference_price",
+)
+
+
+def merge_finish_outlook(
+    signal_entry: dict[str, Any],
+    state: AgentState,
+    agent_id: str,
+    ticker: str,
+    *,
+    thesis_summary: str | None = None,
+) -> None:
+    """Copy outlook fields written by finish_from_signal back into a local signal dict."""
+    stored = state.get("data", {}).get("analyst_signals", {}).get(agent_id, {}).get(ticker, {})
+    if not isinstance(stored, dict):
+        if thesis_summary:
+            signal_entry["thesis_summary"] = thesis_summary
+        return
+    for key in OUTLOOK_MERGE_KEYS:
+        if key in stored and stored[key] is not None:
+            signal_entry[key] = stored[key]
+    if thesis_summary and not signal_entry.get("thesis_summary"):
+        signal_entry["thesis_summary"] = thesis_summary
 
 SUMMARIZER_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
 SUMMARIZER_PROVIDER = ModelProvider.OPENROUTER.value
@@ -189,10 +218,15 @@ def finish_from_signal(
     contradicts: list[str] | None = None,
     supports: list[str] | None = None,
     current_price: float | None = None,
+    analysis_data: dict[str, Any] | None = None,
     subagent_progress: dict[str, Any] | None = None,
 ) -> str:
     """Extract signal, outlook, and reasoning from a structured investor output model."""
     outlook = extract_outlook(output)
+    price_target = outlook.get("price_target")
+    if price_target is None and analysis_data:
+        price_target = derive_price_target(analysis_data, current_price=current_price)
+    time_horizon_months = outlook.get("time_horizon_months", 12)
     return finish_investor_ticker(
         agent_id,
         ticker,
@@ -203,8 +237,8 @@ def finish_from_signal(
         artifacts=artifacts,
         contradicts=contradicts,
         supports=supports,
-        time_horizon_months=outlook.get("time_horizon_months"),
-        price_target=outlook.get("price_target"),
+        time_horizon_months=time_horizon_months,
+        price_target=price_target,
         current_price=current_price,
         subagent_progress=subagent_progress,
     )

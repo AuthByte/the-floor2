@@ -26,7 +26,7 @@ export function ShiftPhaseRail(p: Props) {
 
   if (phase === "resolving") {
     return (
-      <div className="relative z-10 border-b border-wire-800/60 bg-ink-950/70 px-5 py-2">
+      <div className="desk-phase-rail relative z-10 animate-desk-down border-b border-wire-800/60 bg-ink-950/70 px-5 py-2">
         <div className="mx-auto flex max-w-[1700px] items-center gap-3">
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brass animate-pulse-dot" />
           <span className="text-[10px] uppercase tracking-[0.28em] text-brass">{RESOLVING_COPY}</span>
@@ -36,7 +36,7 @@ export function ShiftPhaseRail(p: Props) {
   }
 
   return (
-    <div className="relative z-10 border-b border-wire-800/60 bg-ink-950/70 px-5 py-2.5">
+    <div className="desk-phase-rail relative z-10 animate-desk-down border-b border-wire-800/60 bg-ink-950/70 px-5 py-2.5">
       <div className="mx-auto flex max-w-[1700px] flex-wrap items-center gap-x-4 gap-y-2">
         <span className="text-[9px] font-semibold uppercase tracking-[0.32em] text-wire-600">
           shift pipeline
@@ -48,19 +48,19 @@ export function ShiftPhaseRail(p: Props) {
               <li key={step.id} className="flex items-center gap-1.5">
                 {i > 0 ? (
                   <span
-                    className={`hidden h-px w-3 sm:block ${
-                      state === "done" ? "bg-brass/50" : "bg-wire-800"
+                    className={`hidden h-px w-3 origin-left transition-all duration-500 sm:block ${
+                      state === "done" ? "scale-x-100 bg-brass/50" : "scale-x-50 bg-wire-800"
                     }`}
                     aria-hidden
                   />
                 ) : null}
-                <PhaseChip step={step} state={state} />
+                <PhaseChip step={step} state={state} index={i} />
               </li>
             );
           })}
         </ol>
         {p.runState === "complete" ? (
-          <span className="text-[10px] uppercase tracking-[0.24em] text-brass">clocked out</span>
+          <span className="animate-pop-in text-[10px] uppercase tracking-[0.24em] text-brass">clocked out</span>
         ) : null}
       </div>
     </div>
@@ -80,20 +80,23 @@ function phaseState(index: number, activeIdx: number, runState: RunState): ChipS
 function PhaseChip({
   step,
   state,
+  index,
 }: {
   step: { label: string; short: string };
   state: ChipState;
+  index: number;
 }) {
   const tone =
     state === "active"
-      ? "border-phos/50 bg-phos/10 text-phos"
+      ? "border-phos/50 bg-phos/10 text-phos shadow-phos-soft animate-scale-in"
       : state === "done"
         ? "border-brass/40 bg-brass/5 text-brass/90"
         : "border-wire-800/80 bg-ink-900/40 text-wire-600";
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.18em] transition-colors ${tone}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.18em] transition-all duration-300 ${tone}`}
+      style={{ animationDelay: `${index * 40}ms` }}
       title={step.label}
     >
       {state === "active" ? (

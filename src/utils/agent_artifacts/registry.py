@@ -512,7 +512,9 @@ def catalog_for(agent_id: str) -> list[ChartSpec]:
     charts when the agent is a named investor desk.
     """
     registry_id = canonical_registry_agent_id(agent_id)
-    is_legendary = registry_id in LEGENDARY_INVESTOR_IDS
+    is_legendary = registry_id in LEGENDARY_INVESTOR_IDS or (
+        registry_id.startswith("persona_") and registry_id.endswith("_agent")
+    )
     out: list[ChartSpec] = []
     for s in SPECS:
         if registry_id in s.agent_ids:

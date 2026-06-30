@@ -32,6 +32,7 @@ class ProgressUpdateEvent(BaseEvent):
     signal: Optional[str] = None
     confidence: Optional[float] = None
     thesis_summary: Optional[str] = None
+    token_usage: Optional[dict[str, Any]] = None
 
 class ErrorEvent(BaseEvent):
     """Event indicating an error occurred"""

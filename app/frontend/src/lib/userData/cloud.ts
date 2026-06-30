@@ -1,6 +1,17 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { StoredShift, UserSettings, WatchlistPreset } from "./types";
+import type {
+  ShiftReplayArchive,
+  StoredShift,
+  UserSettings,
+  WatchlistPreset,
+} from "./types";
+
+function replayTimelineReady(replay: unknown): boolean {
+  if (!replay || typeof replay !== "object") return false;
+  const timeline = (replay as ShiftReplayArchive).timeline;
+  return Array.isArray(timeline) && timeline.length > 0;
+}
 
 interface ShiftRow {
   id: string;
@@ -24,6 +35,7 @@ interface WatchlistRow {
   tickers: string;
   hint: string | null;
   sort_order: number;
+  auto_publish: boolean;
 }
 
 export async function fetchUserSettings(
@@ -55,6 +67,9 @@ export async function upsertUserSettings(
   if (error) throw error;
 }
 
+const SHIFT_LIST_SELECT =
+  "id, client_id, run_id, ts_ms, tickers, model, initial_cash, analyst_count, summary, decisions, prices";
+
 export async function fetchShifts(
   supabase: SupabaseClient,
   userId: string,
@@ -62,12 +77,47 @@ export async function fetchShifts(
 ): Promise<StoredShift[]> {
   const { data, error } = await supabase
     .from("shifts")
-    .select("*")
+    .select(SHIFT_LIST_SELECT)
     .eq("user_id", userId)
     .order("ts_ms", { ascending: false })
     .limit(limit);
   if (error) throw error;
   return (data as ShiftRow[]).map(rowToShift);
+}
+
+export async function fetchShiftDetail(
+  supabase: SupabaseClient,
+  userId: string,
+  shiftId: string,
+): Promise<StoredShift | null> {
+  const { data, error } = await supabase
+    .from("shifts")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("id", shiftId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToShift(data as ShiftRow) : null;
+}
+
+/** True when the user's archived shift row has a non-empty replay timeline. */
+export async function shiftHasArchivedReplay(
+  supabase: SupabaseClient,
+  userId: string,
+  opts: { shiftId?: string; runId?: string | null },
+): Promise<boolean> {
+  const { shiftId, runId } = opts;
+  let query = supabase.from("shifts").select("replay").eq("user_id", userId);
+  if (shiftId && /^[0-9a-f-]{36}$/i.test(shiftId)) {
+    query = query.eq("id", shiftId);
+  } else if (runId) {
+    query = query.eq("run_id", runId);
+  } else {
+    return false;
+  }
+  const { data, error } = await query.maybeSingle();
+  if (error) throw error;
+  return replayTimelineReady(data?.replay);
 }
 
 export async function insertShift(
@@ -121,30 +171,65 @@ export async function fetchWatchlists(
     label: row.label,
     tickers: row.tickers,
     hint: row.hint ?? undefined,
+    autoPublish: row.auto_publish ?? false,
   }));
 }
 
+const WATCHLIST_UUID_RE = /^[0-9a-f-]{36}$/i;
+
+function resolveWatchlistId(
+  watchlist: WatchlistPreset,
+  existing: WatchlistPreset[],
+): string {
+  if (WATCHLIST_UUID_RE.test(watchlist.id)) return watchlist.id;
+  const match = existing.find(
+    (row) => row.label === watchlist.label && row.tickers === watchlist.tickers,
+  );
+  return match?.id ?? crypto.randomUUID();
+}
+
+/** Upsert watchlists by id; delete only rows removed from the list (preserves floor_posts FK). */
 export async function replaceWatchlists(
   supabase: SupabaseClient,
   userId: string,
   watchlists: WatchlistPreset[],
-): Promise<void> {
-  const { error: delErr } = await supabase
-    .from("watchlists")
-    .delete()
-    .eq("user_id", userId);
-  if (delErr) throw delErr;
-  if (!watchlists.length) return;
-  const rows = watchlists.map((w, i) => ({
-    user_id: userId,
-    id: w.id.startsWith("wl-") ? undefined : w.id,
-    label: w.label,
-    tickers: w.tickers,
-    hint: w.hint ?? null,
-    sort_order: i,
-  }));
-  const { error } = await supabase.from("watchlists").insert(rows);
-  if (error) throw error;
+): Promise<WatchlistPreset[]> {
+  const existing = await fetchWatchlists(supabase, userId);
+  const existingIds = new Set(existing.map((w) => w.id));
+  const nextIds = new Set<string>();
+
+  const rows = watchlists.map((w, i) => {
+    const id = resolveWatchlistId(w, existing);
+    nextIds.add(id);
+    return {
+      user_id: userId,
+      id,
+      label: w.label,
+      tickers: w.tickers,
+      hint: w.hint ?? null,
+      sort_order: i,
+      auto_publish: w.autoPublish ?? false,
+    };
+  });
+
+  if (rows.length) {
+    const { error: upsertErr } = await supabase
+      .from("watchlists")
+      .upsert(rows, { onConflict: "id" });
+    if (upsertErr) throw upsertErr;
+  }
+
+  const removeIds = [...existingIds].filter((id) => !nextIds.has(id));
+  if (removeIds.length) {
+    const { error: delErr } = await supabase
+      .from("watchlists")
+      .delete()
+      .eq("user_id", userId)
+      .in("id", removeIds);
+    if (delErr) throw delErr;
+  }
+
+  return watchlists.map((w, i) => ({ ...w, id: rows[i]!.id }));
 }
 
 function rowToShift(row: ShiftRow): StoredShift {

@@ -1,10 +1,12 @@
 from langchain_core.messages import HumanMessage
 from src.graph.state import AgentState, show_agent_reasoning
-from src.utils.api_key import get_api_key_from_state
+from src.tools.providers.keys import keys_from_state
 from src.utils.progress import progress
 import json
 
 from src.tools.api import get_earnings_digest, get_financial_metrics, search_line_items
+from src.tools.fetch_sources import record_fetch_source
+from src.utils.tier0_emit import attach_data_sources, begin_ticker_fetch
 
 
 ##### Fundamental Agent #####
@@ -13,11 +15,12 @@ def fundamentals_analyst_agent(state: AgentState, agent_id: str = "fundamentals_
     data = state["data"]
     end_date = data["end_date"]
     tickers = data["tickers"]
-    api_key = get_api_key_from_state(state, "FINANCIAL_DATASETS_API_KEY")
+    api_keys = keys_from_state(state)
     # Initialize fundamental analysis for each ticker
     fundamental_analysis = {}
 
     for ticker in tickers:
+        begin_ticker_fetch()
         progress.update_status(agent_id, ticker, "Fetching SEC EDGAR earnings")
         earnings = get_earnings_digest(
             ticker,
@@ -26,6 +29,8 @@ def fundamentals_analyst_agent(state: AgentState, agent_id: str = "fundamentals_
             agent_id=agent_id,
             use_llm=True,
         )
+        if earnings.available:
+            record_fetch_source("earnings", earnings.source or "sec_edgar")
 
         progress.update_status(agent_id, ticker, "Fetching financial metrics")
 
@@ -35,7 +40,7 @@ def fundamentals_analyst_agent(state: AgentState, agent_id: str = "fundamentals_
             end_date=end_date,
             period="ttm",
             limit=10,
-            api_key=api_key,
+            api_key=api_keys,
         )
 
         if not financial_metrics:
@@ -46,11 +51,11 @@ def fundamentals_analyst_agent(state: AgentState, agent_id: str = "fundamentals_
                 end_date,
                 period="ttm",
                 limit=4,
-                api_key=api_key,
+                api_key=api_keys,
             )
             latest = line_items[0] if line_items else None
             if not latest:
-                fundamental_analysis[ticker] = {
+                fundamental_analysis[ticker] = attach_data_sources({
                     "signal": "neutral",
                     "confidence": 0,
                     "reasoning": {
@@ -59,7 +64,7 @@ def fundamentals_analyst_agent(state: AgentState, agent_id: str = "fundamentals_
                             "details": "No financial metrics or line items available for this ticker.",
                         }
                     },
-                }
+                })
                 progress.update_status(agent_id, ticker, "Done", analysis=json.dumps(fundamental_analysis[ticker], indent=4))
                 continue
 
@@ -228,11 +233,11 @@ def fundamentals_analyst_agent(state: AgentState, agent_id: str = "fundamentals_
             ],
         }
 
-        fundamental_analysis[ticker] = {
+        fundamental_analysis[ticker] = attach_data_sources({
             "signal": overall_signal,
             "confidence": confidence,
             "reasoning": reasoning,
-        }
+        })
 
         try:
             from src.utils.agent_artifacts import attach_artifacts

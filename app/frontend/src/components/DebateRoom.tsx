@@ -55,7 +55,7 @@ export function DebateRoom({ state, roomImage }: Props) {
           maxWidth: "none",
           transformOrigin: "top left",
           transform: `scale(${IMG_SCALE})`,
-          imageRendering: "pixelated",
+          imageRendering: "auto",
           pointerEvents: "none",
           userSelect: "none",
         }}

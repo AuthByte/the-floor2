@@ -81,7 +81,7 @@ def get_insider_trades(
         ("fmp", lambda: fmp.fetch_insider_trades(ticker, limit, keys.get("FMP_API_KEY"))),
         ("sec_edgar", lambda: sec.fetch_insider_trades(ticker, limit)),
     ]
-    return _first(chain, ticker, "insider_trades")
+    return _merge_insider_trades(chain, ticker, limit)
 
 
 def get_company_news(
@@ -97,7 +97,7 @@ def get_company_news(
         ("fmp", lambda: fmp.fetch_company_news(ticker, limit, keys.get("FMP_API_KEY"))),
         ("yfinance", lambda: yf.fetch_company_news(ticker, limit)),
     ]
-    return _first(chain, ticker, "news")
+    return _merge_news(chain, ticker, limit)
 
 
 def get_market_cap(ticker: str, end_date: str, api_key=None) -> tuple[float | None, str]:
@@ -126,6 +126,90 @@ def get_market_cap(ticker: str, end_date: str, api_key=None) -> tuple[float | No
     if metrics and metrics[0].market_cap:
         return metrics[0].market_cap, f"{src}_metrics"
     return None, "none"
+
+
+def _merge_news(chain, ticker: str, limit: int) -> tuple[list[CompanyNews], str]:
+    """Merge news from every configured provider (dedupe by title+url)."""
+    seen: set[tuple[str, str | None]] = set()
+    merged: list[CompanyNews] = []
+    sources: list[str] = []
+
+    for name, fn in chain:
+        try:
+            rows = fn()
+        except Exception as exc:
+            logger.debug("news %s provider %s failed: %s", ticker, name, exc)
+            continue
+        if not rows:
+            continue
+        sources.append(name)
+        for row in rows:
+            key = (row.title or "", row.url)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(row)
+            if len(merged) >= limit:
+                break
+        if len(merged) >= limit:
+            break
+
+    if not merged:
+        logger.warning("All providers failed for news %s", ticker)
+        return [], "none"
+
+    src = "+".join(sources)
+    logger.info("news %s via %s (%d rows, merged)", ticker, src, len(merged))
+    return merged, src
+
+
+def _is_sec_insider_stub(row: InsiderTrade) -> bool:
+    return (row.name or "").strip() == "SEC Form 4" and (row.transaction_shares or 0) == 0
+
+
+def _suppress_sec_stub_rows(rows: list[InsiderTrade]) -> list[InsiderTrade]:
+    rich_dates = {
+        row.filing_date
+        for row in rows
+        if row.filing_date and not _is_sec_insider_stub(row) and (row.transaction_shares or 0) != 0
+    }
+    return [row for row in rows if not _is_sec_insider_stub(row) or row.filing_date not in rich_dates]
+
+
+def _merge_insider_trades(chain, ticker: str, limit: int) -> tuple[list[InsiderTrade], str]:
+    """Merge insider filings from every configured provider (dedupe by name+date+shares)."""
+    seen: set[tuple[str | None, str | None, float | None]] = set()
+    merged: list[InsiderTrade] = []
+    sources: list[str] = []
+
+    for name, fn in chain:
+        try:
+            rows = fn()
+        except Exception as exc:
+            logger.debug("insider_trades %s provider %s failed: %s", ticker, name, exc)
+            continue
+        if not rows:
+            continue
+        sources.append(name)
+        for row in rows:
+            key = (row.name, row.transaction_date or row.filing_date, row.transaction_shares)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(row)
+            if len(merged) >= limit:
+                break
+        if len(merged) >= limit:
+            break
+
+    if not merged:
+        logger.warning("All providers failed for insider_trades %s", ticker)
+        return [], "none"
+
+    merged = _suppress_sec_stub_rows(merged)
+    src = "+".join(sources)
+    logger.info("insider_trades %s via %s (%d rows, merged)", ticker, src, len(merged))
+    return merged, src
 
 
 def _first(chain, ticker: str, kind: str):

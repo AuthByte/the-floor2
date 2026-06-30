@@ -66,6 +66,23 @@ class ResolveTickersResponse(BaseModel):
     direct: bool = False
 
 
+class AlpacaAccountRequest(BaseModel):
+    api_keys: Optional[Dict[str, str]] = None
+
+
+class AlpacaExecuteRequest(BaseModel):
+    api_keys: Optional[Dict[str, str]] = None
+    decisions: Dict[str, Any]
+    current_prices: Optional[Dict[str, Any]] = None
+    shift_id: Optional[str] = None
+
+
+class AlpacaStatusResponse(BaseModel):
+    configured: bool
+    source: str = Field(description="env, request, or none")
+    disabled: bool = False
+
+
 class ErrorResponse(BaseModel):
     message: str
     error: str | None = None
@@ -150,6 +167,7 @@ class HedgeFundRequest(BaseHedgeFundRequest):
     run_risk_pipeline: bool = True
     send_memo_email: bool = False
     digest_email: Optional[str] = None
+    persona_pack_ids: Optional[List[str]] = None
     ticker_query: Optional[str] = Field(
         default=None,
         description="Optional natural-language request used to resolve tickers when symbols are omitted.",
@@ -167,6 +185,73 @@ class DebateInterjectionRequest(BaseModel):
     ticker: str = Field(..., min_length=1, max_length=16)
     message: str = Field(..., min_length=1, max_length=1200)
     chair_name: Optional[str] = Field(default="Chair", max_length=48)
+
+
+class UserConsultationRequest(BaseModel):
+    run_id: str = Field(..., min_length=4, max_length=64)
+    ticker: str = Field(..., min_length=1, max_length=16)
+    message: str = Field(..., min_length=2, max_length=1200)
+    chair_name: Optional[str] = Field(default="Chair", max_length=48)
+
+
+class RevisionSnapshot(BaseModel):
+    signal: Optional[str] = None
+    confidence: Optional[float] = None
+    thesis_summary: Optional[str] = None
+    price_target: Optional[float] = None
+    reasoning_excerpt: Optional[str] = None
+
+
+class ThesisRevisionRecord(BaseModel):
+    id: str
+    ts: str
+    prompt: str
+    chair_name: str
+    before: RevisionSnapshot
+    after: RevisionSnapshot
+    reply_to_user: str
+    propagation: Optional[dict] = None
+
+
+class CohortChange(BaseModel):
+    agent: str
+    from_cohort: str
+    to_cohort: str
+
+
+class DebateAdjustment(BaseModel):
+    ticker: str
+    cohort_changes: List[CohortChange] = []
+    confidence_deltas: List[dict] = []
+    synthetic_lines_added: int = 0
+
+
+class DecisionRevision(BaseModel):
+    before: dict
+    after: dict
+    changed: bool
+    reason: Optional[str] = None
+
+
+class ChairImpact(BaseModel):
+    consult_count: int
+    material_count: int
+    revisions: List[ThesisRevisionRecord]
+    debate_adjustments: List[DebateAdjustment] = []
+    decisions: Dict[str, DecisionRevision]
+    propagation_errors: List[str] = []
+
+
+class UserConsultationResponse(BaseModel):
+    ok: bool = True
+    agent_key: Optional[str] = None
+    agent_id: Optional[str] = None
+    ticker: Optional[str] = None
+    revision: Optional[dict] = None
+    bucket: Optional[dict] = None
+    material: bool = False
+    propagation_queued: bool = False
+    phase: str = "analysis"
 
 
 # Flow-related schemas
@@ -318,3 +403,52 @@ class ApiKeySummaryResponse(BaseModel):
 class ApiKeyBulkUpdateRequest(BaseModel):
     """Request to update multiple API keys at once"""
     api_keys: List[ApiKeyCreateRequest]
+
+
+class ShiftScheduleCreateRequest(BaseModel):
+    label: Optional[str] = None
+    tickers: List[str] = Field(default_factory=list)
+    ticker_query: Optional[str] = None
+    enabled: bool = True
+    timezone: Optional[str] = None
+    recurrence: str = "daily"
+    time_local: str = "09:30:00"
+    days_of_week: Optional[List[int]] = None
+    run_once_at: Optional[str] = None
+    enabled_agent_keys: List[str] = Field(default_factory=list)
+    watchlist_id: Optional[str] = None
+    source_shift_id: Optional[str] = None
+    template_key: Optional[str] = None
+    auto_publish: bool = False
+    notify_email: bool = False
+    initial_cash: float = 100_000
+    run_risk_pipeline: bool = True
+    model_name: Optional[str] = None
+
+
+class ShiftScheduleUpdateRequest(BaseModel):
+    label: Optional[str] = None
+    tickers: Optional[List[str]] = None
+    enabled: Optional[bool] = None
+    timezone: Optional[str] = None
+    recurrence: Optional[str] = None
+    time_local: Optional[str] = None
+    days_of_week: Optional[List[int]] = None
+    run_once_at: Optional[str] = None
+    enabled_agent_keys: Optional[List[str]] = None
+    watchlist_id: Optional[str] = None
+    auto_publish: Optional[bool] = None
+    notify_email: Optional[bool] = None
+    initial_cash: Optional[float] = None
+    run_risk_pipeline: Optional[bool] = None
+    model_name: Optional[str] = None
+
+
+class SchedulerChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+    conversation_id: Optional[str] = None
+
+
+class SchedulerPrefsUpdateRequest(BaseModel):
+    timezone: Optional[str] = None
+    vacation_mode: Optional[bool] = None

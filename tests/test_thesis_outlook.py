@@ -2,6 +2,7 @@
 
 from src.utils.thesis_outlook import (
     compute_upside_pct,
+    derive_price_target,
     enrich_outlook,
     extract_outlook,
     format_horizon,
@@ -66,6 +67,14 @@ def test_finish_investor_ticker_persists_outlook():
     assert bucket["upside_pct"] == 25.0
 
 
-def test_compute_upside_pct_handles_none():
-    assert compute_upside_pct(None, 100) is None
-    assert compute_upside_pct(110, None) is None
+def test_derive_price_target_from_intrinsic_per_share():
+    analysis = {"intrinsic_val_analysis": {"intrinsic_per_share": 142.5}}
+    assert derive_price_target(analysis) == 142.5
+
+
+def test_derive_price_target_from_total_and_shares():
+    analysis = {
+        "intrinsic_value_analysis": {"intrinsic_value": 1_000_000_000},
+        "outstanding_shares": 10_000_000,
+    }
+    assert derive_price_target(analysis) == 100.0

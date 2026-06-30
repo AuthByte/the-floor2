@@ -98,6 +98,12 @@ export function UserDataProvider({ children }: { children: ReactNode }) {
         if (!remoteSettings.migratedFromLocal) {
           const merged = mergeSettings(localSettings, remoteSettings);
           merged.migratedFromLocal = true;
+          if (
+            merged.onboarding_completed !== true &&
+            (localSettings.tickers || (localSettings.enabledAgents?.length ?? 0) > 0)
+          ) {
+            merged.onboarding_completed = true;
+          }
           await upsertUserSettings(supabase, userId, merged);
           if (localShifts.length) await migrateLocalShifts(supabase, userId, localShifts);
           if (localWatchlists.length) await replaceWatchlists(supabase, userId, localWatchlists);
@@ -109,13 +115,25 @@ export function UserDataProvider({ children }: { children: ReactNode }) {
           fetchWatchlists(supabase, userId),
         ]);
 
+        const mergedShifts = remoteShifts.map((remote) => {
+          const local = localShifts.find(
+            (row) => row.id === remote.id || (remote.runId && row.runId === remote.runId),
+          );
+          if (!local) return remote;
+          return {
+            ...remote,
+            payload: remote.payload ?? local.payload ?? null,
+            replay: remote.replay ?? local.replay ?? null,
+          };
+        });
+
         if (cancelled) return;
 
         writeLocalSettings(remoteSettings);
-        persistLocalShifts(remoteShifts);
+        persistLocalShifts(mergedShifts);
 
         setSettings(remoteSettings);
-        setShifts(remoteShifts);
+        setShifts(mergedShifts);
         setWatchlistsState(remoteWatchlists.length ? remoteWatchlists : localWatchlists);
       } catch (err) {
         console.error("Failed to hydrate user data from Supabase:", err);
@@ -234,7 +252,9 @@ export function UserDataProvider({ children }: { children: ReactNode }) {
       const supabase = getSupabase();
       if (!supabase) return;
       try {
-        await replaceWatchlists(supabase, session.user.id, lists);
+        const synced = await replaceWatchlists(supabase, session.user.id, lists);
+        setWatchlistsState(synced);
+        localStorage.setItem("floor.customWatchlists", JSON.stringify(synced));
       } catch (err) {
         console.error("Failed to save watchlists:", err);
       }

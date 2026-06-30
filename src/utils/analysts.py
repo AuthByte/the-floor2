@@ -35,8 +35,15 @@ from src.agents.david_einhorn import david_einhorn_agent
 from src.agents.unknown_unknowns import unknown_unknowns_agent
 from src.agents.supply_chain_cartographer import supply_chain_cartographer_agent
 from src.agents.opportunity_cost import opportunity_cost_agent
+from src.agents.insider_activity_desk import insider_activity_desk_agent
 from src.agents.ripple_desk import ripple_desk_agent
 from src.agents.bastion_moat import bastion_moat_agent
+from src.agents.quant_desk import (
+    quant_mean_reversion_agent,
+    quant_momentum_agent,
+    quant_pead_agent,
+    quant_volatility_agent,
+)
 
 # Define analyst configuration - single source of truth
 ANALYST_CONFIG = {
@@ -272,6 +279,38 @@ ANALYST_CONFIG = {
         "type": "analyst",
         "order": 21.6,
     },
+    "quant_pead": {
+        "display_name": "PEAD Model",
+        "description": "Post-Earnings Announcement Drift",
+        "investing_style": "Pure quant view on fresh earnings surprises — drift signal from BEAT/MISS filings in the post-announcement window.",
+        "agent_func": quant_pead_agent,
+        "type": "analyst",
+        "order": 21.7,
+    },
+    "quant_momentum": {
+        "display_name": "Momentum Model",
+        "description": "12-1 Month Momentum",
+        "investing_style": "Blends 12-month and 1-month price momentum into a conviction score — trend-following quant desk.",
+        "agent_func": quant_momentum_agent,
+        "type": "analyst",
+        "order": 21.8,
+    },
+    "quant_mean_reversion": {
+        "display_name": "Mean Reversion Model",
+        "description": "Short-Horizon Mean Reversion",
+        "investing_style": "Fades stretched moves vs the 20-day mean — contrarian quant overlay.",
+        "agent_func": quant_mean_reversion_agent,
+        "type": "analyst",
+        "order": 21.9,
+    },
+    "quant_volatility": {
+        "display_name": "Volatility Model",
+        "description": "Volatility Regime",
+        "investing_style": "Scores realized volatility and drift — favors stable uptrends, penalizes chaotic tape.",
+        "agent_func": quant_volatility_agent,
+        "type": "analyst",
+        "order": 22.0,
+    },
     "warren_buffett": {
         "display_name": "Warren Buffett",
         "description": "The Oracle of Omaha",
@@ -311,6 +350,17 @@ ANALYST_CONFIG = {
         "agent_func": news_sentiment_agent,
         "type": "analyst",
         "order": 26,
+    },
+    "insider_activity_desk": {
+        "display_name": "Insider Activity Desk",
+        "description": "Form 4 Watch Specialist",
+        "investing_style": (
+            "Monitors legal public SEC Form 4 filings and licensed feeds for cluster buying, "
+            "officer vs director patterns, and filing velocity — not MNPI or tips."
+        ),
+        "agent_func": insider_activity_desk_agent,
+        "type": "analyst",
+        "order": 26.5,
     },
     "sentiment_analyst": {
         "display_name": "Sentiment Analyst",

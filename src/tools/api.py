@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import logging
 import os
 import pandas as pd
@@ -13,6 +14,7 @@ from src.data.models import (
     Price,
 )
 from src.tools.http import make_api_request
+from src.tools.fetch_sources import record_fetch_source
 from src.tools.providers import fallback
 from src.tools.providers.macro import fetch_combined_macro
 from src.tools.providers.keys import resolve_api_keys
@@ -29,7 +31,8 @@ def get_prices(ticker: str, start_date: str, end_date: str, api_key: str = None)
     if cached_data := _cache.get_prices(cache_key):
         return [Price(**price) for price in cached_data]
 
-    prices, _src = fallback.get_prices(ticker, start_date, end_date, api_key)
+    prices, src = fallback.get_prices(ticker, start_date, end_date, api_key)
+    record_fetch_source("prices", src)
     if prices:
         _cache.set_prices(cache_key, [p.model_dump() for p in prices])
     return prices
@@ -46,12 +49,14 @@ def get_financial_metrics(
     if cached_data := _cache.get_financial_metrics(cache_key):
         return [FinancialMetrics(**metric) for metric in cached_data]
 
-    metrics, _src = fallback.get_financial_metrics(ticker, end_date, period, limit, api_key)
+    metrics, src = fallback.get_financial_metrics(ticker, end_date, period, limit, api_key)
     if not metrics:
         metrics = _synthesize_financial_metrics(ticker, end_date, period, api_key)
         if metrics:
+            src = "synthesized"
             logger.info("financial_metrics %s via synthesized (%d rows)", ticker, len(metrics))
     if metrics:
+        record_fetch_source("financial_metrics", src)
         _cache.set_financial_metrics(cache_key, [m.model_dump() for m in metrics])
     return metrics
 
@@ -136,7 +141,15 @@ def search_line_items(
     limit: int = 10,
     api_key: str = None,
 ) -> list[LineItem]:
-    items, _src = fallback.search_line_items(ticker, line_items, end_date, period, limit, api_key)
+    items_key = hashlib.md5("|".join(sorted(line_items)).encode()).hexdigest()[:12]
+    cache_key = f"{ticker}_{period}_{end_date}_{limit}_{items_key}"
+    if cached_data := _cache.get_line_items(cache_key):
+        return [LineItem(**item) for item in cached_data]
+
+    items, src = fallback.search_line_items(ticker, line_items, end_date, period, limit, api_key)
+    record_fetch_source("line_items", src)
+    if items:
+        _cache.set_line_items(cache_key, [item.model_dump() for item in items])
     return items
 
 
@@ -151,7 +164,8 @@ def get_insider_trades(
     if cached_data := _cache.get_insider_trades(cache_key):
         return [InsiderTrade(**trade) for trade in cached_data]
 
-    trades, _src = fallback.get_insider_trades(ticker, end_date, start_date, limit, api_key)
+    trades, src = fallback.get_insider_trades(ticker, end_date, start_date, limit, api_key)
+    record_fetch_source("insider_trades", src)
     if trades:
         _cache.set_insider_trades(cache_key, [t.model_dump() for t in trades])
     return trades
@@ -168,7 +182,8 @@ def get_company_news(
     if cached_data := _cache.get_company_news(cache_key):
         return [CompanyNews(**news) for news in cached_data]
 
-    news, _src = fallback.get_company_news(ticker, end_date, start_date, limit, api_key)
+    news, src = fallback.get_company_news(ticker, end_date, start_date, limit, api_key)
+    record_fetch_source("news", src)
     if news:
         _cache.set_company_news(cache_key, [n.model_dump() for n in news])
     return news
@@ -176,14 +191,16 @@ def get_company_news(
 
 def get_market_cap(ticker: str, end_date: str, api_key: str = None) -> float | None:
     if end_date == datetime.datetime.now().strftime("%Y-%m-%d"):
-        cap, _src = fallback.get_market_cap(ticker, end_date, api_key)
+        cap, src = fallback.get_market_cap(ticker, end_date, api_key)
+        record_fetch_source("market_cap", src)
         return cap
 
     financial_metrics = get_financial_metrics(ticker, end_date, api_key=api_key)
     if financial_metrics and financial_metrics[0].market_cap:
         return financial_metrics[0].market_cap
 
-    cap, _src = fallback.get_market_cap(ticker, end_date, api_key)
+    cap, src = fallback.get_market_cap(ticker, end_date, api_key)
+    record_fetch_source("market_cap", src)
     return cap
 
 
@@ -212,7 +229,10 @@ def get_macro_context(end_date: str | None = None, api_key: str | dict | None = 
     keys = resolve_api_keys(api_key)
     fred_key = keys.get("FRED_API_KEY")
     as_of = end_date or datetime.datetime.now().strftime("%Y-%m-%d")
-    return fetch_combined_macro(as_of, fred_key)
+    macro = fetch_combined_macro(as_of, fred_key)
+    if macro.get("available"):
+        record_fetch_source("macro", macro.get("source"))
+    return macro
 
 
 def prices_to_df(prices: list[Price]) -> pd.DataFrame:

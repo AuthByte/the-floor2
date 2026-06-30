@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextvars import ContextVar
 from typing import Any
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -21,6 +22,13 @@ from src.utils.progress import progress
 from src.utils.thesis_verdict import publish_debate_verdict
 
 ARGUMENT_ROOM_ID = "argument_room"
+
+_run_analyst_config: ContextVar[dict | None] = ContextVar("run_analyst_config", default=None)
+
+
+def _active_analyst_config() -> dict:
+    cfg = _run_analyst_config.get()
+    return cfg if isinstance(cfg, dict) and cfg else ANALYST_CONFIG
 
 MAX_CONFIDENCE_DROP = 12
 
@@ -42,17 +50,19 @@ def extract_base_agent_key(unique_id: str) -> str:
 
 def is_named_investor(agent_id: str) -> bool:
     base = extract_base_agent_key(agent_id)
-    return base in ANALYST_CONFIG and base not in DATA_FEED_KEYS
+    cfg = _active_analyst_config()
+    return base in cfg and base not in DATA_FEED_KEYS
 
 
 def _investor_meta(agent_id: str) -> dict[str, str]:
     base = extract_base_agent_key(agent_id)
-    cfg = ANALYST_CONFIG.get(base, {})
+    cfg = _active_analyst_config()
+    entry = cfg.get(base, {})
     return {
         "agent_id": agent_id,
         "base_key": base,
-        "name": cfg.get("display_name", base),
-        "specialty": cfg.get("investing_style", ""),
+        "name": entry.get("display_name", base),
+        "specialty": entry.get("investing_style", ""),
     }
 
 
@@ -495,6 +505,20 @@ def debate_chamber_node(state: AgentState) -> dict[str, Any]:
     tickers: list[str] = data.get("tickers", [])
     run_id: str | None = data.get("run_id")
 
+    cfg_token = _run_analyst_config.set(data.get("run_analyst_config") or ANALYST_CONFIG)
+    try:
+        return _run_debate_chamber(state, data, analyst_signals, tickers, run_id)
+    finally:
+        _run_analyst_config.reset(cfg_token)
+
+
+def _run_debate_chamber(
+    state: AgentState,
+    data: dict[str, Any],
+    analyst_signals: dict[str, Any],
+    tickers: list[str],
+    run_id: str | None,
+) -> dict[str, Any]:
     investor_ids = sorted(aid for aid in analyst_signals if is_named_investor(aid))
 
     if not investor_ids:
@@ -517,10 +541,23 @@ def debate_chamber_node(state: AgentState) -> dict[str, Any]:
     progress.update_status(
         ARGUMENT_ROOM_ID, None, "Chamber open — all investors entering committee"
     )
+    live_session = None
+    if run_id:
+        from src.utils.live_run_registry import get_session
+
+        live_session = get_session(run_id)
+        if live_session:
+            live_session.set_phase("debate")
+
     all_rounds: list[dict[str, Any]] = []
     flat_feed: list[dict[str, Any]] = []
 
     for ticker in tickers:
+        if live_session:
+            from src.utils.consultation_propagation import capture_debate_baseline
+
+            capture_debate_baseline(live_session, ticker)
+
         left_id, right_id = pick_debate_pair(
             ticker=ticker,
             investor_ids=investor_ids,

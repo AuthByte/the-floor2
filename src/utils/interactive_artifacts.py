@@ -30,6 +30,8 @@ INTERACTIVE_KINDS = frozenset(
         "growth_acceleration",
         "burry_contrarian",
         "dalio_regime",
+        "insider_timeline",
+        "insider_cluster_card",
     }
 )
 
@@ -288,6 +290,56 @@ def build_ripple_cascade(ticker: str, analysis: dict[str, Any]) -> dict[str, Any
         caption="Ripple Desk — second- and third-order paths from the obvious trade.",
         data={"ticker": ticker},
         graph=graph,
+    )
+
+
+def build_insider_timeline(ticker: str, analysis: dict[str, Any]) -> dict[str, Any]:
+    """Weekly net-share bars from largest buys metadata (desk artifact)."""
+    largest = analysis.get("largest_buys") or []
+    weeks: dict[str, float] = {}
+    for row in largest:
+        day = str(row.get("date") or "")[:10]
+        if not day:
+            continue
+        week_key = day[:7]
+        weeks[week_key] = weeks.get(week_key, 0.0) + float(row.get("shares") or 0)
+
+    bars = [{"week": k, "net_shares": round(v, 2)} for k, v in sorted(weeks.items())]
+    return _artifact(
+        artifact_id="insider_timeline",
+        kind="insider_timeline",
+        title=f"{ticker} Form 4 timeline",
+        caption="Insider Activity Desk — net shares by month from notable filings.",
+        data={
+            "ticker": ticker,
+            "bars": bars,
+            "cluster_score": analysis.get("cluster_score"),
+            "net_shares_90d": analysis.get("net_shares_90d"),
+        },
+    )
+
+
+def build_insider_cluster_card(ticker: str, analysis: dict[str, Any]) -> dict[str, Any]:
+    """Table of largest insider buyers with title and value."""
+    buyers = analysis.get("largest_buys") or []
+    cluster_score = float(analysis.get("cluster_score") or 0)
+    unique_buyers_30d = int(analysis.get("unique_buyers_30d") or 0)
+    return _artifact(
+        artifact_id="insider_cluster_card",
+        kind="insider_cluster_card",
+        title=f"{ticker} insider cluster",
+        caption="Insider Activity Desk — coordinated buying signal from public Form 4 data.",
+        data={
+            "ticker": ticker,
+            "cluster_score": cluster_score,
+            "cluster_alert": cluster_score >= 7 and unique_buyers_30d >= 3,
+            "unique_buyers_30d": unique_buyers_30d,
+            "buyers": buyers,
+            "disclaimer": (
+                "Public SEC filings and licensed feeds only. "
+                "Filing activity does not prove intent or future performance."
+            ),
+        },
     )
 
 

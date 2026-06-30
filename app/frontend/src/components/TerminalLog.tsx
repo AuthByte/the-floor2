@@ -1,9 +1,64 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { agentForCallsign } from "../lib/agents";
 import { roomBounds } from "../lib/layout";
 import type { LogLine, RunState } from "../lib/types";
 
 const PIN_THRESHOLD_PX = 48;
+
+function isTypingTarget(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  const tag = el.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    tag === "SELECT" ||
+    el.isContentEditable
+  );
+}
+
+function wireHaystack(line: LogLine): string {
+  const agent = agentForCallsign(line.callsign);
+  return [
+    line.callsign,
+    line.ticker ?? "",
+    line.status,
+    agent?.name ?? "",
+    agent?.desk ?? "",
+    agent?.key ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+}
+
+function lineMatchesQuery(line: LogLine, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  return wireHaystack(line).includes(q);
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function highlightMatch(text: string, query: string): ReactNode {
+  const q = query.trim();
+  if (!q) return text;
+  const re = new RegExp(`(${escapeRegExp(q)})`, "gi");
+  const parts = text.split(re);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    i % 2 === 1 ? (
+      <mark
+        key={`${i}-${part}`}
+        className="rounded-sm bg-brass/25 text-inherit ring-1 ring-brass/30"
+      >
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
 
 interface Props {
   log: LogLine[];
@@ -11,12 +66,22 @@ interface Props {
   onFocusRoom?: (roomId: string) => void;
 }
 
-export function TerminalLog({ log, runState, onFocusRoom }: Props) {
+export const TerminalLog = memo(function TerminalLog({ log, runState, onFocusRoom }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const pinnedRef = useRef(true);
   const prevLenRef = useRef(0);
   const [showJump, setShowJump] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const trimmedQuery = searchQuery.trim();
+  const isFiltering = trimmedQuery.length > 0;
+
+  const visibleLog = useMemo(
+    () => (isFiltering ? log.filter((line) => lineMatchesQuery(line, trimmedQuery)) : log),
+    [log, isFiltering, trimmedQuery],
+  );
 
   const isNearBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -41,6 +106,8 @@ export function TerminalLog({ log, runState, onFocusRoom }: Props) {
   }, [isNearBottom]);
 
   useEffect(() => {
+    if (isFiltering) return;
+
     const grew = log.length > prevLenRef.current;
     prevLenRef.current = log.length;
 
@@ -50,30 +117,98 @@ export function TerminalLog({ log, runState, onFocusRoom }: Props) {
     requestAnimationFrame(() => {
       scrollToBottom(grew && log.length > 8 ? "smooth" : "auto");
     });
-  }, [log, scrollToBottom]);
+  }, [log, scrollToBottom, isFiltering]);
 
   useEffect(() => {
-    if (runState === "running") pinnedRef.current = true;
-  }, [runState]);
+    if (runState === "running" && !isFiltering) pinnedRef.current = true;
+  }, [runState, isFiltering]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (isTypingTarget(e.target)) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
-    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-l border-wire-800/80 bg-ink-950/95">
-      <header className="flex shrink-0 items-center justify-between border-b border-wire-800/80 px-4 py-2.5">
-        <div className="flex items-center gap-2.5">
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${
-              runState === "running"
-                ? "bg-phos animate-pulse-dot"
-                : "bg-wire-700"
-            }`}
-          />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.34em] text-wire-300">
-            live wire
+    <aside
+      data-tour="wire-log"
+      className="flex h-full min-h-0 flex-col overflow-hidden border-l border-wire-800/80 bg-ink-950/95"
+    >
+      <header className="shrink-0 border-b border-wire-800/80">
+        <div className="flex items-center justify-between px-4 py-2.5">
+          <div className="flex items-center gap-2.5">
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                runState === "running"
+                  ? "bg-phos animate-pulse-dot"
+                  : "bg-wire-700"
+              }`}
+            />
+            <span className="text-[10px] font-semibold uppercase tracking-[0.34em] text-wire-300">
+              live wire
+            </span>
+          </div>
+          <span className="font-mono text-[10px] tracking-[0.18em] text-wire-700">
+            tail&nbsp;-f&nbsp;/floor
           </span>
         </div>
-        <span className="font-mono text-[10px] tracking-[0.18em] text-wire-700">
-          tail&nbsp;-f&nbsp;/floor
-        </span>
+
+        <div className="flex items-center gap-2 border-t border-wire-900/80 px-3 py-2">
+          <div className="relative min-w-0 flex-1">
+            <span
+              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-wire-600"
+              aria-hidden
+            >
+              /
+            </span>
+            <input
+              ref={searchRef}
+              type="search"
+              value={searchQuery}
+              onChange={(e) => {
+                const next = e.target.value;
+                setSearchQuery(next);
+                if (next.trim()) {
+                  pinnedRef.current = false;
+                  setShowJump(false);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  if (searchQuery) {
+                    e.stopPropagation();
+                    setSearchQuery("");
+                  } else {
+                    searchRef.current?.blur();
+                  }
+                }
+              }}
+              placeholder="search wire…"
+              aria-label="Search live wire"
+              className="w-full rounded-sm border border-wire-800/90 bg-ink-900/80 py-1 pl-5 pr-7 font-mono text-[10px] text-wire-200 placeholder:text-wire-700 outline-none transition focus:border-brass/50 focus:ring-1 focus:ring-brass/25"
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded px-1 font-mono text-[10px] text-wire-600 transition hover:text-brass"
+                aria-label="Clear search"
+              >
+                ×
+              </button>
+            ) : null}
+          </div>
+          {isFiltering ? (
+            <span className="shrink-0 font-mono text-[9px] uppercase tracking-[0.16em] text-wire-600">
+              {visibleLog.length}/{log.length}
+            </span>
+          ) : null}
+        </div>
       </header>
 
       <div className="relative min-h-0 flex-1">
@@ -84,22 +219,43 @@ export function TerminalLog({ log, runState, onFocusRoom }: Props) {
         >
           {log.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
-              <span className="h-1.5 w-1.5 rounded-full bg-wire-800" />
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  runState === "running" ? "bg-amber animate-pulse" : "bg-wire-800"
+                }`}
+              />
               <p className="text-[10px] uppercase tracking-[0.32em] text-wire-700">
-                wire is quiet
+                {runState === "running" ? "desk connecting" : "wire is quiet"}
               </p>
-              <p className="max-w-[22ch] text-[10px] leading-relaxed text-wire-800">
-                start a shift to stream the desk in real time
+              <p className="max-w-[28ch] text-[10px] leading-relaxed text-wire-800">
+                {runState === "running"
+                  ? "waiting for the backend stream — tier-0 feeds can take a minute with a full roster"
+                  : "start a shift to stream the desk in real time"}
+              </p>
+            </div>
+          ) : isFiltering && visibleLog.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
+              <p className="text-[10px] uppercase tracking-[0.28em] text-wire-600">
+                no matches
+              </p>
+              <p className="max-w-[26ch] font-mono text-[10px] leading-relaxed text-wire-700">
+                nothing on the wire for &ldquo;{trimmedQuery}&rdquo;
               </p>
             </div>
           ) : (
             <ul className="space-y-px font-mono text-[11px] leading-snug">
-              {log.map((line) => (
-                <LogRow key={line.id} line={line} onFocusRoom={onFocusRoom} />
+              {visibleLog.map((line, i) => (
+                <LogRow
+                  key={line.id}
+                  line={line}
+                  query={trimmedQuery}
+                  isNew={!isFiltering && i === visibleLog.length - 1}
+                  onFocusRoom={onFocusRoom}
+                />
               ))}
             </ul>
           )}
-          {runState === "running" && log.length > 0 ? (
+          {runState === "running" && log.length > 0 && !isFiltering ? (
             <div className="flex items-center gap-1.5 px-2 pt-2 text-[11px] text-wire-500">
               <span className="text-brass">$</span>
               <span className="inline-block h-3 w-[2px] bg-brass animate-blink" />
@@ -108,7 +264,7 @@ export function TerminalLog({ log, runState, onFocusRoom }: Props) {
           <div ref={bottomRef} className="h-px shrink-0" aria-hidden />
         </div>
 
-        {showJump ? (
+        {showJump && !isFiltering ? (
           <button
             type="button"
             onClick={() => {
@@ -124,13 +280,17 @@ export function TerminalLog({ log, runState, onFocusRoom }: Props) {
       </div>
     </aside>
   );
-}
+});
 
-function LogRow({
+const LogRow = memo(function LogRow({
   line,
+  query = "",
+  isNew = false,
   onFocusRoom,
 }: {
   line: LogLine;
+  query?: string;
+  isNew?: boolean;
   onFocusRoom?: (roomId: string) => void;
 }) {
   const time = formatTime(line.ts);
@@ -154,7 +314,11 @@ function LogRow({
           ? "bg-amber/70"
           : "bg-transparent";
   return (
-    <li className="group flex gap-2 rounded-sm px-2 py-0.5 transition-colors hover:bg-wire-900/40">
+    <li
+      className={`group flex gap-2 rounded-sm px-2 py-0.5 transition-colors hover:bg-wire-900/40 ${
+        isNew ? "animate-wire-in" : ""
+      }`}
+    >
       <span className={`-ml-1 w-0.5 shrink-0 rounded-full ${rail}`} aria-hidden />
       <span className="shrink-0 text-wire-700">{time}</span>
       {floorRoomId && onFocusRoom ? (
@@ -168,20 +332,24 @@ function LogRow({
               : `Zoom to [${line.callsign}] on the floor`
           }
         >
-          [{line.callsign}]
+          [{highlightMatch(line.callsign, query)}]
         </button>
       ) : (
-        <span className="shrink-0 text-brass/70">[{line.callsign}]</span>
+        <span className="shrink-0 text-brass/70">
+          [{highlightMatch(line.callsign, query)}]
+        </span>
       )}
       {line.ticker ? (
         <span className="shrink-0 font-semibold text-wire-300">
-          {line.ticker}
+          {highlightMatch(line.ticker, query)}
         </span>
       ) : null}
-      <span className={`min-w-0 break-words ${tone}`}>{line.status}</span>
+      <span className={`min-w-0 break-words ${tone}`}>
+        {highlightMatch(line.status, query)}
+      </span>
     </li>
   );
-}
+});
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
