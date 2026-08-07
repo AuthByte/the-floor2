@@ -165,7 +165,7 @@ export function ControlConsole(p: Props) {
 
         <div className="flex flex-col items-end justify-end gap-2">
           {startBlockers.length > 0 ? (
-            <ul className="max-w-[220px] text-right text-[9px] leading-relaxed text-wire-600">
+            <ul className="max-w-[240px] rounded border border-siren/25 bg-siren/[0.06] px-2.5 py-1.5 text-right text-[9px] leading-relaxed text-siren/90">
               {startBlockers.map((b) => (
                 <li key={b}>{b}</li>
               ))}

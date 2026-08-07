@@ -282,7 +282,7 @@ export function BacktesterPanel(p: Props) {
           </div>
 
           {blockers.length > 0 && runState === "idle" ? (
-            <ul className="rounded-md border border-wire-800/70 bg-ink-900/40 px-4 py-2 text-[11px] leading-relaxed text-wire-500">
+            <ul className="rounded-md border border-siren/30 bg-siren/[0.06] px-4 py-2 text-[11px] leading-relaxed text-siren/90">
               {blockers.map((b) => (
                 <li key={b}>· {b}</li>
               ))}

@@ -254,9 +254,11 @@ export default function App() {
 
 
 
+  const persistUserSettings = userData.updateSettings;
+
   useEffect(() => {
     if (!settingsHydrated) return;
-    userData.updateSettings({
+    persistUserSettings({
       model,
       tickers,
       theme,
@@ -278,7 +280,7 @@ export default function App() {
     runRiskPipeline,
     memoEmail,
     digestEmail,
-    userData,
+    persistUserSettings,
   ]);
 
 
@@ -995,8 +997,6 @@ export default function App() {
         onSetNamedTier={(on) => roster.setTier(roster.namedKeys, on)}
 
         onSetSpecialistTier={(on) => roster.setTier(roster.specialistKeys, on)}
-
-        onSetQuantTier={(on) => roster.setTier(roster.quantKeys, on)}
 
         runState={floor.runState}
 

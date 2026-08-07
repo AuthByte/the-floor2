@@ -75,8 +75,9 @@ export async function fetchBillingStatus(): Promise<BillingStatus> {
 /** Routes paid tiers through existing Stripe checkout stubs. */
 export async function createCheckout(
   plan: CheckoutPlan,
-  _opts?: { successUrl?: string; cancelUrl?: string },
+  opts?: { successUrl?: string; cancelUrl?: string },
 ): Promise<CheckoutResponse> {
+  void opts;
   if (plan === "day_pass") {
     return startCheckout("day_pass");
   }

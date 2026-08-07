@@ -16,6 +16,9 @@ interface Props {
   onOpenWeather?: () => void;
   theme?: "light" | "dark";
   onToggleTheme?: () => void;
+  /** Shown when Supabase auth is configured and a user is signed in. */
+  userEmail?: string | null;
+  onSignOut?: () => void | Promise<void>;
 }
 
 const STATUS_COPY: Record<
@@ -64,6 +67,8 @@ export function SystemBar({
   onOpenWeather,
   theme = "light",
   onToggleTheme,
+  userEmail = null,
+  onSignOut,
 }: Props) {
   const s = STATUS_COPY[runState];
 
@@ -206,6 +211,26 @@ export function SystemBar({
               </svg>
             )}
           </button>
+        ) : null}
+        {userEmail ? (
+          <div className="flex max-w-[180px] items-center gap-2 border-l border-wire-800/80 pl-2">
+            <span
+              className="truncate font-mono text-[10px] text-wire-400"
+              title={userEmail}
+            >
+              {userEmail}
+            </span>
+            {onSignOut ? (
+              <button
+                type="button"
+                onClick={() => void onSignOut()}
+                title="Sign out"
+                className="rounded border border-wire-700 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-wire-400 transition hover:border-siren/50 hover:text-siren active:translate-y-px"
+              >
+                out
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
 

@@ -12,7 +12,7 @@ export function setAuthTokenGetter(getter: TokenGetter | null) {
   authTokenGetter = getter;
 }
 
-async function authHeaders(
+export async function authHeaders(
   extra: Record<string, string> = {},
 ): Promise<Record<string, string>> {
   const headers: Record<string, string> = { ...extra };

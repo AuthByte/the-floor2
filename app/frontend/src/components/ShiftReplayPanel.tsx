@@ -38,26 +38,34 @@ export function ShiftReplayPanel({
     return buildShiftTimeline(rooms, log, shiftStartedAt);
   }, [rooms, log, shiftStartedAt]);
 
-  const startTs = timeline[0]?.ts ?? shiftStartedAt ?? Date.now();
+  // Never fall back to Date.now() during render — that changes every frame and
+  // retriggers effects (maximum update depth) while the panel is closed.
+  const startTs = timeline[0]?.ts ?? shiftStartedAt ?? 0;
   const endTs = timeline[timeline.length - 1]?.ts ?? startTs;
 
-  const [cursor, setCursor] = useState(startTs);
+  const [cursor, setCursor] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(2);
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number>(0);
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
     if (!open) {
-      setPlaying(false);
+      if (wasOpenRef.current) {
+        wasOpenRef.current = false;
+        setPlaying(false);
+      }
       return;
     }
+    wasOpenRef.current = true;
     setCursor(startTs);
   }, [open, startTs]);
 
   useEffect(() => {
+    if (!open) return;
     onTimeChange?.(cursor);
-  }, [cursor, onTimeChange]);
+  }, [open, cursor, onTimeChange]);
 
   useEffect(() => {
     if (!open) return;

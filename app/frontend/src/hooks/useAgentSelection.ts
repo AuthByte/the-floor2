@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { DATA_ANALYSTS, NAMED_ANALYSTS, SPECIALIST_ANALYSTS, QUANT_ANALYSTS } from "../lib/agents";
+import { DATA_ANALYSTS, NAMED_ANALYSTS, SPECIALIST_ANALYSTS } from "../lib/agents";
 import {
   defaultEnabledKeys,
   loadEnabledKeys,
@@ -73,10 +73,6 @@ export function useAgentSelection() {
     () => SPECIALIST_ANALYSTS.map((a) => a.key),
     [],
   );
-  const quantKeys = useMemo(
-    () => QUANT_ANALYSTS.map((a) => a.key),
-    [],
-  );
 
   return {
     enabled,
@@ -91,6 +87,5 @@ export function useAgentSelection() {
     dataKeys,
     namedKeys,
     specialistKeys,
-    quantKeys,
   };
 }

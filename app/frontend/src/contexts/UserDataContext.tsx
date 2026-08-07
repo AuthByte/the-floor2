@@ -51,6 +51,24 @@ function mergeSettings(base: UserSettings, patch: Partial<UserSettings>): UserSe
   return { ...base, ...patch };
 }
 
+function settingsEqual(a: UserSettings, b: UserSettings): boolean {
+  if (a === b) return true;
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof UserSettings>;
+  for (const key of keys) {
+    const av = a[key];
+    const bv = b[key];
+    if (Array.isArray(av) && Array.isArray(bv)) {
+      if (av.length !== bv.length) return false;
+      for (let i = 0; i < av.length; i++) {
+        if (av[i] !== bv[i]) return false;
+      }
+      continue;
+    }
+    if (av !== bv) return false;
+  }
+  return true;
+}
+
 export function UserDataProvider({ children }: { children: ReactNode }) {
   const { session, configured: authConfigured } = useAuth();
   const cloud = authConfigured && Boolean(session);
@@ -156,6 +174,9 @@ export function UserDataProvider({ children }: { children: ReactNode }) {
     (patch: Partial<UserSettings>) => {
       setSettings((prev) => {
         const next = mergeSettings(prev, patch);
+        // Bail out when nothing changed — App syncs settings on every
+        // render cycle and a new object here would loop forever.
+        if (settingsEqual(prev, next)) return prev;
         if (settingsTimer.current) clearTimeout(settingsTimer.current);
         settingsTimer.current = setTimeout(() => {
           void persistSettings(next);
