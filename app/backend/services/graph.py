@@ -10,11 +10,9 @@ from src.agents.risk_manager import risk_management_agent
 from src.tools.api import get_macro_context
 from src.main import start
 from src.utils.analysts import ANALYST_CONFIG
-from src.utils.agent_tiers import is_legend_tier, QUANT_KEYS, SPECIALIST_KEYS
+from src.utils.agent_tiers import QUANT_KEYS
 from src.utils.persona_registry import RunAnalystRegistry, default_registry, packs_for_state
 from src.agents.debate_chamber import debate_chamber_node
-from src.agents.analysis_gate import ANALYSIS_GATE_ID, analysis_gate_node
-from src.agents.quant_gate import QUANT_GATE_ID, quant_gate_node
 from src.agents.risk_forge import risk_forge_node
 from src.agents.risk_research_hub import risk_research_hub_node
 from src.agents.risk_watchtower import risk_watchtower_node
@@ -29,6 +27,7 @@ from src.utils.risk_pipeline import (
 from src.graph.state import AgentState
 from src.utils.data_feed_keys import DATA_FEED_KEYS
 from src.data.cache import get_cache
+from src.desk.evidence import reset_evidence
 
 
 def extract_base_agent_key(unique_id: str) -> str:
@@ -65,8 +64,6 @@ def create_graph(
     graph.add_node("start_node", start)
     graph.add_node("debate_chamber", debate_chamber_node)
     graph.add_node(TIER1_GATE_ID, tier1_gate_node)
-    graph.add_node(ANALYSIS_GATE_ID, analysis_gate_node)
-    graph.add_node(QUANT_GATE_ID, quant_gate_node)
     graph.add_node(RISK_FORGE_ID, risk_forge_node)
     graph.add_node(RISK_RESEARCH_HUB_ID, risk_research_hub_node)
     graph.add_node(SCENARIO_LAB_ID, scenario_lab_node)
@@ -138,62 +135,45 @@ def create_graph(
                 # Add edge between agent nodes (but not direct to portfolio managers)
                 graph.add_edge(edge.source, edge.target)
     
-    # Tier-0 data feeds run first; legends wait on tier1_gate; specialists on analysis_gate; quant on quant_gate.
-    tier0_ids: list[str] = []
-    legend_ids: list[str] = []
-    specialist_ids: list[str] = []
-    quant_ids: list[str] = []
+    # Phase 1 — evidence: data feeds and quant models run in parallel from start.
+    # Phase 2 — risk chain catalogues what could go wrong.
+    # Phase 3 — every analyst desk (investors, personas, specialists) argues in parallel
+    #           with the data, quant and risk briefings already on the table.
+    evidence_ids: list[str] = []
+    analyst_ids: list[str] = []
     for agent_id in agent_ids:
         base = extract_base_agent_key(agent_id)
         if base == "portfolio_manager" or base not in analyst_config:
             continue
-        if base in DATA_FEED_KEYS:
-            tier0_ids.append(agent_id)
-        elif is_legend_tier(base, analyst_config):
-            legend_ids.append(agent_id)
-        elif base in SPECIALIST_KEYS:
-            specialist_ids.append(agent_id)
-        elif base in QUANT_KEYS:
-            quant_ids.append(agent_id)
+        if base in DATA_FEED_KEYS or base in QUANT_KEYS:
+            evidence_ids.append(agent_id)
         else:
-            legend_ids.append(agent_id)
+            analyst_ids.append(agent_id)
 
     graph.add_edge(RISK_FORGE_ID, RISK_RESEARCH_HUB_ID)
     graph.add_edge(RISK_RESEARCH_HUB_ID, SCENARIO_LAB_ID)
     graph.add_edge(SCENARIO_LAB_ID, RISK_WATCHTOWER_ID)
     graph.add_edge(RISK_WATCHTOWER_ID, TIER1_GATE_ID)
 
-    if tier0_ids:
-        for agent_id in tier0_ids:
+    if evidence_ids:
+        for agent_id in evidence_ids:
             graph.add_edge("start_node", agent_id)
             graph.add_edge(agent_id, RISK_FORGE_ID)
     else:
         graph.add_edge("start_node", RISK_FORGE_ID)
 
-    if legend_ids:
-        for agent_id in legend_ids:
+    if analyst_ids:
+        for agent_id in analyst_ids:
             graph.add_edge(TIER1_GATE_ID, agent_id)
-            graph.add_edge(agent_id, ANALYSIS_GATE_ID)
-    else:
-        graph.add_edge(TIER1_GATE_ID, ANALYSIS_GATE_ID)
-
-    if specialist_ids:
-        for agent_id in specialist_ids:
-            graph.add_edge(ANALYSIS_GATE_ID, agent_id)
-            graph.add_edge(agent_id, QUANT_GATE_ID)
-    else:
-        graph.add_edge(ANALYSIS_GATE_ID, QUANT_GATE_ID)
-
-    if quant_ids:
-        for agent_id in quant_ids:
-            graph.add_edge(QUANT_GATE_ID, agent_id)
             graph.add_edge(agent_id, "debate_chamber")
     else:
-        graph.add_edge(QUANT_GATE_ID, "debate_chamber")
+        graph.add_edge(TIER1_GATE_ID, "debate_chamber")
 
     # Connect analysts that have direct connections to portfolio managers through the debate chamber
-    for analyst_id, portfolio_manager_id in direct_to_portfolio_managers.items():
-        graph.add_edge(analyst_id, "debate_chamber")
+    # Phase-1 desks already reach the debate via the risk chain; a direct edge would let it fire early.
+    for analyst_id in direct_to_portfolio_managers:
+        if analyst_id not in evidence_ids and analyst_id not in analyst_ids:
+            graph.add_edge(analyst_id, "debate_chamber")
 
     # Debate chamber feeds each risk manager before portfolio synthesis
     for portfolio_manager_id in portfolio_manager_nodes:
@@ -268,6 +248,7 @@ def run_graph(
     macro_context = get_macro_context(end_date, api_keys)
 
     get_cache().clear()
+    reset_evidence()
 
     registry = analyst_registry or default_registry()
     persona_packs = {

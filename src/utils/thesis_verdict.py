@@ -131,6 +131,7 @@ def finish_investor_ticker(
     price_target: float | None = None,
     current_price: float | None = None,
     subagent_progress: dict[str, Any] | None = None,
+    thesis_summary: str | None = None,
 ) -> str:
     """Summarize thesis and push verdict fields to the floor stream.
 
@@ -138,7 +139,7 @@ def finish_investor_ticker(
     artifacts alongside the prose thesis without changing the SSE event shape.
     """
     conf = float(confidence)
-    summary = summarize_investor_thesis(
+    summary = (thesis_summary or "").strip() or summarize_investor_thesis(
         ticker=ticker,
         signal=signal,
         confidence=conf,

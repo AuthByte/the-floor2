@@ -1,5 +1,4 @@
 import json
-import time
 from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 
@@ -68,6 +67,8 @@ def portfolio_management_agent(state: AgentState, agent_id: str = "portfolio_man
                         conf = None
                 if sig is not None and conf is not None:
                     compact = {"sig": sig, "conf": conf}
+                    if bucket.get("user_consulted"):
+                        compact["user_consulted"] = True
                     for src, dst in (
                         ("time_horizon_months", "horizon_mo"),
                         ("price_target", "target"),
@@ -190,30 +191,8 @@ def compute_allowed_actions(
     return allowed
 
 
-def _compact_signals(signals_by_ticker: dict[str, dict]) -> dict[str, dict]:
-    """Keep only {agent: {sig, conf}} and drop empty agents."""
-    out = {}
-    for t, agents in signals_by_ticker.items():
-        if not agents:
-            out[t] = {}
-            continue
-        compact = {}
-        for agent, payload in agents.items():
-            sig = payload.get("sig") or payload.get("signal")
-            conf = payload.get("conf") if "conf" in payload else payload.get("confidence")
-            if sig is not None and conf is not None:
-                compact[agent] = {"sig": sig, "conf": conf}
-                for src, dst in (
-                    ("horizon_mo", "horizon_mo"),
-                    ("target", "target"),
-                    ("upside_pct", "upside_pct"),
-                    ("time_horizon_months", "horizon_mo"),
-                    ("price_target", "target"),
-                ):
-                    if payload.get(src) is not None and dst not in compact[agent]:
-                        compact[agent][dst] = payload[src]
-        out[t] = compact
-    return out
+class _RationaleOutput(BaseModel):
+    rationale: dict[str, str] = Field(default_factory=dict, description="ticker -> one-line rationale")
 
 
 def generate_trading_decision(
@@ -227,39 +206,45 @@ def generate_trading_decision(
         *,
         chair_context: bool = False,
 ) -> PortfolioManagerOutput:
-    """Get decisions from the LLM with deterministic constraints and a minimal prompt."""
+    """Conviction ensemble picks action and size; the LLM only writes the rationale."""
+    from src.desk.ensemble import decide, fallback_rationale, tally
 
-    # Deterministic constraints
     allowed_actions_full = compute_allowed_actions(tickers, current_prices, max_shares, portfolio)
+    positions = portfolio.get("positions", {}) or {}
 
-    # Pre-fill pure holds to avoid sending them to the LLM at all
-    prefilled_decisions: dict[str, PortfolioDecision] = {}
-    tickers_for_llm: list[str] = []
+    decisions: dict[str, PortfolioDecision] = {}
+    tallies = {}
     for t in tickers:
-        aa = allowed_actions_full.get(t, {"hold": 0})
-        # If only 'hold' key exists, there is no trade possible
-        if set(aa.keys()) == {"hold"}:
-            prefilled_decisions[t] = PortfolioDecision(
-                action="hold", quantity=0, confidence=100.0, reasoning="No valid trade available"
-            )
-        else:
-            tickers_for_llm.append(t)
+        tl = tally(signals_by_ticker.get(t, {}))
+        tallies[t] = tl
+        action, qty, conf = decide(tl, allowed_actions_full.get(t, {"hold": 0}), positions.get(t))
+        decisions[t] = PortfolioDecision(
+            action=action,
+            quantity=qty,
+            confidence=int(round(conf)),
+            reasoning=fallback_rationale(t, action, qty, tl),
+        )
+        progress.update_status(agent_id, t, f"Committee net {tl.net:+.2f} → {action} {qty}")
 
-    if not tickers_for_llm:
-        return PortfolioManagerOutput(decisions=prefilled_decisions)
+    state["data"]["committee_tally"] = {t: tl.to_dict() for t, tl in tallies.items()}
 
-    # Build compact payloads only for tickers sent to LLM
-    compact_signals = _compact_signals({t: signals_by_ticker.get(t, {}) for t in tickers_for_llm})
-    compact_allowed = {t: allowed_actions_full[t] for t in tickers_for_llm}
-    desk_context = {
-        t: tier0_briefing_for_ticker(state, t) for t in tickers_for_llm
+    worth_explaining = [t for t in tickers if tallies[t].voters]
+    if not worth_explaining:
+        return PortfolioManagerOutput(decisions=decisions)
+
+    brief = {
+        t: {
+            "decision": f"{decisions[t].action} {decisions[t].quantity}",
+            "net": round(tallies[t].net, 2),
+            "split": f"{tallies[t].bulls} bull / {tallies[t].bears} bear / {tallies[t].neutrals} neutral",
+            "for": tallies[t].top_for,
+            "against": tallies[t].top_against,
+            "desk": tier0_briefing_for_ticker(state, t) or "",
+        }
+        for t in worth_explaining
     }
-    desk_context = {t: v for t, v in desk_context.items() if v}
-
-    # Minimal prompt template
     chair_note = (
-        "Chair consulted agents mid-shift; revised signals marked user_consulted. "
-        "Weight those revisions appropriately.\n"
+        "The chair consulted desks mid-shift; mention it if it moved the decision. "
         if chair_context
         else ""
     )
@@ -267,59 +252,28 @@ def generate_trading_decision(
         [
             (
                 "system",
-                "You are a portfolio manager.\n"
+                "You are the portfolio manager signing the committee memo. The decisions are final and were "
+                "computed from the committee vote; do not change or second-guess them. "
                 + chair_note
-                + "Inputs per ticker: analyst signals and allowed actions with max qty (already validated).\n"
-                "Pick one allowed action per ticker and a quantity ≤ the max. "
-                "Keep reasoning very concise (max 100 chars). No cash or margin math. Return JSON only."
+                + "For each ticker write one plain sentence (max 140 chars) explaining the decision: "
+                "the deciding argument and the strongest dissent. Return JSON only.",
             ),
             (
                 "human",
-                "Signals:\n{signals}\n\n"
-                "Allowed:\n{allowed}\n\n"
-                "{desk_block}"
-                "Format:\n"
-                "{{\n"
-                '  "decisions": {{\n'
-                '    "TICKER": {{"action":"...","quantity":int,"confidence":int,"reasoning":"..."}}\n'
-                "  }}\n"
-                "}}"
+                '{brief}\n\nReturn: {{"rationale": {{"TICKER": "..."}}}}',
             ),
         ]
     )
-
-    prompt_data = {
-        "signals": json.dumps(compact_signals, separators=(",", ":"), ensure_ascii=False),
-        "allowed": json.dumps(compact_allowed, separators=(",", ":"), ensure_ascii=False),
-        "desk_block": (
-            "Desk briefings (tier-0 + quant — use for conviction, do not re-fetch):\n"
-            + json.dumps(desk_context, ensure_ascii=False)
-            + "\n\n"
-            if desk_context
-            else ""
-        ),
-    }
-    prompt = template.invoke(prompt_data)
-
-    # Default factory fills remaining tickers as hold if the LLM fails
-    def create_default_portfolio_output():
-        # start from prefilled
-        decisions = dict(prefilled_decisions)
-        for t in tickers_for_llm:
-            decisions[t] = PortfolioDecision(
-                action="hold", quantity=0, confidence=0.0, reasoning="Default decision: hold"
-            )
-        return PortfolioManagerOutput(decisions=decisions)
-
-    llm_out = call_llm(
+    prompt = template.invoke({"brief": json.dumps(brief, ensure_ascii=False, default=str)[:12000]})
+    out = call_llm(
         prompt=prompt,
-        pydantic_model=PortfolioManagerOutput,
+        pydantic_model=_RationaleOutput,
         agent_name=agent_id,
         state=state,
-        default_factory=create_default_portfolio_output,
+        default_factory=_RationaleOutput,
     )
-
-    # Merge prefilled holds with LLM results
-    merged = dict(prefilled_decisions)
-    merged.update(llm_out.decisions)
-    return PortfolioManagerOutput(decisions=merged)
+    for t, line in (out.rationale or {}).items():
+        key = t.upper() if t.upper() in decisions else t
+        if key in decisions and line and line.strip():
+            decisions[key].reasoning = line.strip()[:200]
+    return PortfolioManagerOutput(decisions=decisions)

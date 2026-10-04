@@ -514,6 +514,8 @@ async def run(
                     "risk_pipeline": result.get("data", {}).get("risk_pipeline", {}),
                     "shift_artifacts": result.get("data", {}).get("shift_artifacts", {}),
                     "debate_rounds": debate_rounds,
+                    "evidence_ledgers": result.get("data", {}).get("evidence_ledgers", {}),
+                    "committee_tally": result.get("data", {}).get("committee_tally", {}),
                 }
                 from src.utils.token_usage import tracker as token_tracker
 
