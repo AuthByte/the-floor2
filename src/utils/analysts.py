@@ -1,37 +1,13 @@
 """Constants and utilities related to analysts configuration."""
 
 from src.agents import portfolio_manager
-from src.agents.aswath_damodaran import aswath_damodaran_agent
-from src.agents.ben_graham import ben_graham_agent
-from src.agents.bill_ackman import bill_ackman_agent
-from src.agents.carl_icahn import carl_icahn_agent
-from src.agents.cathie_wood import cathie_wood_agent
-from src.agents.charlie_munger import charlie_munger_agent
+from src.desk.agents import make_lens_agent
 from src.agents.fundamentals import fundamentals_analyst_agent
-from src.agents.michael_burry import michael_burry_agent
-from src.agents.phil_fisher import phil_fisher_agent
-from src.agents.peter_lynch import peter_lynch_agent
 from src.agents.sentiment import sentiment_analyst_agent
-from src.agents.stanley_druckenmiller import stanley_druckenmiller_agent
-from src.agents.george_soros import george_soros_agent
 from src.agents.technicals import technical_analyst_agent
 from src.agents.valuation import valuation_analyst_agent
-from src.agents.warren_buffett import warren_buffett_agent
-from src.agents.rakesh_jhunjhunwala import rakesh_jhunjhunwala_agent
-from src.agents.mohnish_pabrai import mohnish_pabrai_agent
-from src.agents.nassim_taleb import nassim_taleb_agent
 from src.agents.news_sentiment import news_sentiment_agent
 from src.agents.growth_agent import growth_analyst_agent
-from src.agents.howard_marks import howard_marks_agent
-from src.agents.jim_simons import jim_simons_agent
-from src.agents.joel_greenblatt import joel_greenblatt_agent
-from src.agents.john_templeton import john_templeton_agent
-from src.agents.li_lu import li_lu_agent
-from src.agents.masayoshi_son import masayoshi_son_agent
-from src.agents.paul_tudor_jones import paul_tudor_jones_agent
-from src.agents.ray_dalio import ray_dalio_agent
-from src.agents.seth_klarman import seth_klarman_agent
-from src.agents.david_einhorn import david_einhorn_agent
 from src.agents.unknown_unknowns import unknown_unknowns_agent
 from src.agents.supply_chain_cartographer import supply_chain_cartographer_agent
 from src.agents.opportunity_cost import opportunity_cost_agent
@@ -51,7 +27,7 @@ ANALYST_CONFIG = {
         "display_name": "Aswath Damodaran",
         "description": "The Dean of Valuation",
         "investing_style": "Focuses on intrinsic value and financial metrics to assess investment opportunities through rigorous valuation analysis.",
-        "agent_func": aswath_damodaran_agent,
+        "agent_func": make_lens_agent("aswath_damodaran", "Aswath Damodaran"),
         "type": "analyst",
         "order": 0,
     },
@@ -59,7 +35,7 @@ ANALYST_CONFIG = {
         "display_name": "Ben Graham",
         "description": "The Father of Value Investing",
         "investing_style": "Emphasizes a margin of safety and invests in undervalued companies with strong fundamentals through systematic value analysis.",
-        "agent_func": ben_graham_agent,
+        "agent_func": make_lens_agent("ben_graham", "Ben Graham"),
         "type": "analyst",
         "order": 1,
     },
@@ -67,7 +43,7 @@ ANALYST_CONFIG = {
         "display_name": "Bill Ackman",
         "description": "The Activist Investor",
         "investing_style": "Seeks to influence management and unlock value through strategic activism and contrarian investment positions.",
-        "agent_func": bill_ackman_agent,
+        "agent_func": make_lens_agent("bill_ackman", "Bill Ackman"),
         "type": "analyst",
         "order": 2,
     },
@@ -75,7 +51,7 @@ ANALYST_CONFIG = {
         "display_name": "Cathie Wood",
         "description": "The Queen of Growth Investing",
         "investing_style": "Focuses on disruptive innovation and growth, investing in companies that are leading technological advancements and market disruption.",
-        "agent_func": cathie_wood_agent,
+        "agent_func": make_lens_agent("cathie_wood", "Cathie Wood"),
         "type": "analyst",
         "order": 3,
     },
@@ -83,7 +59,7 @@ ANALYST_CONFIG = {
         "display_name": "Charlie Munger",
         "description": "The Rational Thinker",
         "investing_style": "Advocates for value investing with a focus on quality businesses and long-term growth through rational decision-making.",
-        "agent_func": charlie_munger_agent,
+        "agent_func": make_lens_agent("charlie_munger", "Charlie Munger"),
         "type": "analyst",
         "order": 4,
     },
@@ -91,7 +67,7 @@ ANALYST_CONFIG = {
         "display_name": "Michael Burry",
         "description": "The Big Short Contrarian",
         "investing_style": "Makes contrarian bets, often shorting overvalued markets and investing in undervalued assets through deep fundamental analysis.",
-        "agent_func": michael_burry_agent,
+        "agent_func": make_lens_agent("michael_burry", "Michael Burry"),
         "type": "analyst",
         "order": 5,
     },
@@ -99,7 +75,7 @@ ANALYST_CONFIG = {
         "display_name": "Mohnish Pabrai",
         "description": "The Dhandho Investor",
         "investing_style": "Focuses on value investing and long-term growth through fundamental analysis and a margin of safety.",
-        "agent_func": mohnish_pabrai_agent,
+        "agent_func": make_lens_agent("mohnish_pabrai", "Mohnish Pabrai"),
         "type": "analyst",
         "order": 6,
     },
@@ -107,7 +83,7 @@ ANALYST_CONFIG = {
         "display_name": "Nassim Taleb",
         "description": "The Black Swan Risk Analyst",
         "investing_style": "Focuses on tail risk, antifragility, and asymmetric payoffs. Uses barbell strategy, avoids fragile companies via negativa, and seeks convex positions with limited downside and unlimited upside.",
-        "agent_func": nassim_taleb_agent,
+        "agent_func": make_lens_agent("nassim_taleb", "Nassim Taleb"),
         "type": "analyst",
         "order": 7,
     },
@@ -115,7 +91,7 @@ ANALYST_CONFIG = {
         "display_name": "Peter Lynch",
         "description": "The 10-Bagger Investor",
         "investing_style": "Invests in companies with understandable business models and strong growth potential using the 'buy what you know' strategy.",
-        "agent_func": peter_lynch_agent,
+        "agent_func": make_lens_agent("peter_lynch", "Peter Lynch"),
         "type": "analyst",
         "order": 8,
     },
@@ -123,7 +99,7 @@ ANALYST_CONFIG = {
         "display_name": "Phil Fisher",
         "description": "The Scuttlebutt Investor",
         "investing_style": "Emphasizes investing in companies with strong management and innovative products, focusing on long-term growth through scuttlebutt research.",
-        "agent_func": phil_fisher_agent,
+        "agent_func": make_lens_agent("phil_fisher", "Phil Fisher"),
         "type": "analyst",
         "order": 9,
     },
@@ -131,7 +107,7 @@ ANALYST_CONFIG = {
         "display_name": "Rakesh Jhunjhunwala",
         "description": "The Big Bull Of India",
         "investing_style": "Leverages macroeconomic insights to invest in high-growth sectors, particularly within emerging markets and domestic opportunities.",
-        "agent_func": rakesh_jhunjhunwala_agent,
+        "agent_func": make_lens_agent("rakesh_jhunjhunwala", "Rakesh Jhunjhunwala"),
         "type": "analyst",
         "order": 10,
     },
@@ -139,7 +115,7 @@ ANALYST_CONFIG = {
         "display_name": "Stanley Druckenmiller",
         "description": "The Macro Investor",
         "investing_style": "Focuses on macroeconomic trends, making large bets on currencies, commodities, and interest rates through top-down analysis.",
-        "agent_func": stanley_druckenmiller_agent,
+        "agent_func": make_lens_agent("stanley_druckenmiller", "Stanley Druckenmiller"),
         "type": "analyst",
         "order": 11,
     },
@@ -147,7 +123,7 @@ ANALYST_CONFIG = {
         "display_name": "George Soros",
         "description": "The Reflexivity Trader",
         "investing_style": "Exploits reflexive feedback loops between market prices and fundamentals, seeking asymmetric macro and equity bets when narratives shift.",
-        "agent_func": george_soros_agent,
+        "agent_func": make_lens_agent("george_soros", "George Soros"),
         "type": "analyst",
         "order": 11.5,
     },
@@ -155,7 +131,7 @@ ANALYST_CONFIG = {
         "display_name": "Jim Simons",
         "description": "The Quantitative Scientist",
         "investing_style": "Looks for statistically persistent price, anomaly, volatility, and liquidity signals using systematic quantitative analysis.",
-        "agent_func": jim_simons_agent,
+        "agent_func": make_lens_agent("jim_simons", "Jim Simons"),
         "type": "analyst",
         "order": 12,
     },
@@ -163,7 +139,7 @@ ANALYST_CONFIG = {
         "display_name": "Howard Marks",
         "description": "The Cycle Risk Philosopher",
         "investing_style": "Emphasizes credit quality, cycle awareness, downside protection, and valuation only when it compensates for risk.",
-        "agent_func": howard_marks_agent,
+        "agent_func": make_lens_agent("howard_marks", "Howard Marks"),
         "type": "analyst",
         "order": 13,
     },
@@ -171,7 +147,7 @@ ANALYST_CONFIG = {
         "display_name": "Seth Klarman",
         "description": "The Deep Value Guardian",
         "investing_style": "Demands margin of safety through asset backing, free cash flow yield, low expectations, and balance-sheet protection.",
-        "agent_func": seth_klarman_agent,
+        "agent_func": make_lens_agent("seth_klarman", "Seth Klarman"),
         "type": "analyst",
         "order": 14,
     },
@@ -179,7 +155,7 @@ ANALYST_CONFIG = {
         "display_name": "John Templeton",
         "description": "The Global Contrarian",
         "investing_style": "Searches for bargains at points of pessimism where improving fundamentals support long-term recovery.",
-        "agent_func": john_templeton_agent,
+        "agent_func": make_lens_agent("john_templeton", "John Templeton"),
         "type": "analyst",
         "order": 15,
     },
@@ -187,7 +163,7 @@ ANALYST_CONFIG = {
         "display_name": "Joel Greenblatt",
         "description": "The Magic Formula Investor",
         "investing_style": "Combines earnings yield and return on capital to find good businesses at bargain prices.",
-        "agent_func": joel_greenblatt_agent,
+        "agent_func": make_lens_agent("joel_greenblatt", "Joel Greenblatt"),
         "type": "analyst",
         "order": 16,
     },
@@ -195,7 +171,7 @@ ANALYST_CONFIG = {
         "display_name": "Ray Dalio",
         "description": "The All-Weather Macro Builder",
         "investing_style": "Evaluates businesses through macro balance, deleveraging resilience, cash-flow durability, and risk parity instincts.",
-        "agent_func": ray_dalio_agent,
+        "agent_func": make_lens_agent("ray_dalio", "Ray Dalio"),
         "type": "analyst",
         "order": 17,
     },
@@ -203,7 +179,7 @@ ANALYST_CONFIG = {
         "display_name": "Paul Tudor Jones",
         "description": "The Disciplined Macro Trader",
         "investing_style": "Prioritizes trend, drawdown stops, volatility regime, and catalyst momentum over static valuation narratives.",
-        "agent_func": paul_tudor_jones_agent,
+        "agent_func": make_lens_agent("paul_tudor_jones", "Paul Tudor Jones"),
         "type": "analyst",
         "order": 18,
     },
@@ -211,7 +187,7 @@ ANALYST_CONFIG = {
         "display_name": "Carl Icahn",
         "description": "The Corporate Raider",
         "investing_style": "Seeks activist situations where undervaluation, capital structure, capital returns, insider signals, or governance pressure can unlock value.",
-        "agent_func": carl_icahn_agent,
+        "agent_func": make_lens_agent("carl_icahn", "Carl Icahn"),
         "type": "analyst",
         "order": 19,
     },
@@ -219,7 +195,7 @@ ANALYST_CONFIG = {
         "display_name": "Li Lu",
         "description": "The Quality Value Compounder",
         "investing_style": "Looks for long-term compounding, strong returns on capital, conservative leverage, and value discipline.",
-        "agent_func": li_lu_agent,
+        "agent_func": make_lens_agent("li_lu", "Li Lu"),
         "type": "analyst",
         "order": 20,
     },
@@ -227,7 +203,7 @@ ANALYST_CONFIG = {
         "display_name": "Masayoshi Son",
         "description": "The Visionary Convexity Investor",
         "investing_style": "Balances growth acceleration, reinvestment, and TAM narrative momentum against valuation and volatility risk.",
-        "agent_func": masayoshi_son_agent,
+        "agent_func": make_lens_agent("masayoshi_son", "Masayoshi Son"),
         "type": "analyst",
         "order": 21,
     },
@@ -267,7 +243,7 @@ ANALYST_CONFIG = {
         "display_name": "David Einhorn",
         "description": "The Forensic Short Seller",
         "investing_style": "Hunts accounting aggressiveness, weak cash conversion, insider selling, and balance-sheet stress — often building asymmetric short theses when the market prices perfection.",
-        "agent_func": david_einhorn_agent,
+        "agent_func": make_lens_agent("david_einhorn", "David Einhorn"),
         "type": "analyst",
         "order": 21.5,
     },
@@ -315,7 +291,7 @@ ANALYST_CONFIG = {
         "display_name": "Warren Buffett",
         "description": "The Oracle of Omaha",
         "investing_style": "Seeks companies with strong fundamentals and competitive advantages through value investing and long-term ownership.",
-        "agent_func": warren_buffett_agent,
+        "agent_func": make_lens_agent("warren_buffett", "Warren Buffett"),
         "type": "analyst",
         "order": 22,
     },

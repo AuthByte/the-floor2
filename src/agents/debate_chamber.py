@@ -133,6 +133,15 @@ def _peer_entries(
     return out
 
 
+def _ledger_table(state: AgentState, ticker: str) -> str:
+    try:
+        from src.desk.evidence import get_evidence
+
+        return get_evidence(state, ticker).as_table()
+    except Exception:
+        return "unavailable"
+
+
 def _run_debate_turn(
     *,
     agent_id: str,
@@ -181,7 +190,8 @@ def _run_debate_turn(
                 "- Your signal MUST remain {original_signal}.\n"
                 "- confidence_delta must be 0 or negative only (max {max_drop}).\n"
                 "- Write 2-3 sentences with specific points and direct counters.\n"
-                "- Reference concrete metrics or evidence from the provided theses.\n"
+                "- Argue from the shared evidence ledger: cite fact ids like [F07]. Attack the peer's weakest cited fact "
+                "or the ledger fact they ignored. Never introduce numbers that are not in the ledger.\n"
                 "- Avoid generic phrasing.\n"
                 "{mode_note}\n"
                 "Return JSON only.",
@@ -192,6 +202,7 @@ def _run_debate_turn(
                 "YOUR THESIS ({original_signal}, {original_confidence}%):\n"
                 "{own_reasoning}\n\n"
                 "PEERS TO CHALLENGE ({peer_names}):\n{peer_block}\n\n"
+                "SHARED EVIDENCE LEDGER:\n{ledger}\n\n"
                 'Return: {{"rebuttal": "...", "confidence_delta": 0, "signal": "{original_signal}"}}',
             ),
         ]
@@ -209,6 +220,7 @@ def _run_debate_turn(
             "original_confidence": int(original_confidence),
             "own_reasoning": own.get("reasoning", ""),
             "peer_block": peer_block,
+            "ledger": _ledger_table(state, ticker),
         }
     )
 

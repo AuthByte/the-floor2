@@ -82,8 +82,11 @@ def call_llm(
                 parsed_result = extract_json_from_response(content)
                 if parsed_result:
                     return pydantic_model(**parsed_result)
-            else:
-                return result
+                raise ValueError("Could not parse LLM JSON response")
+            if result is None:
+                # json_mode with include_raw reports parse failures as parsed=None, not an exception.
+                raise ValueError("LLM returned no parseable structured output")
+            return result
 
         except Exception as e:
             if agent_name:

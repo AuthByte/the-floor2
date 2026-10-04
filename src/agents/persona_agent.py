@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.agents._legendary_investor_utils import run_legendary_agent
-from src.agents.persona_metrics import generic_persona_metrics
+from src.desk.engine import run_lens_agent
+from src.desk.lenses import lens_from_persona_weights
 from src.graph.state import AgentState
 from src.utils.consultation import extract_base_agent_key
 from src.utils.persona_models import PersonaPack
@@ -20,15 +20,10 @@ def persona_agent(state: AgentState, agent_id: str = "persona_agent") -> dict[st
     if disclaimer:
         persona = f"{persona}\n\n{disclaimer}"
 
-    return run_legendary_agent(
-        state=state,
-        agent_id=agent_id,
-        investor_name=pack.display_name,
-        agent_label=f"{pack.display_name} (Persona)",
-        persona=persona,
-        checklist=pack.checklist,
-        analysis_fn=generic_persona_metrics(pack.metric_profile),
-    )
+    checklist = "; ".join(pack.checklist)
+    creed = f"{persona}\n\nChecklist: {checklist}" if checklist else persona
+    lens = lens_from_persona_weights(base, creed, pack.metric_profile.weights.model_dump())
+    return run_lens_agent(state, agent_id, lens, pack.display_name)
 
 
 def _resolve_pack(state: AgentState, agent_key: str) -> PersonaPack:
